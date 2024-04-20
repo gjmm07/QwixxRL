@@ -9,8 +9,8 @@ from environment import GameEnvironment, Environment
 
 
 GAME_ENVIRONMENT = GameEnvironment()
-PLAYERS: deque[Agent | RealPlayer | RLAgent] = deque((RealPlayer("Finn", Environment(GAME_ENVIRONMENT)),
-                                                      RLAgent("Luisa", Environment(GAME_ENVIRONMENT))))
+PLAYERS: deque[Agent | RealPlayer | RLAgent] = deque((Agent("Finn", Environment(GAME_ENVIRONMENT)),
+                                                      Agent("Luisa", Environment(GAME_ENVIRONMENT))))
 
 
 def next_player() -> Generator[Agent | RLAgent | RealPlayer, None, None]:

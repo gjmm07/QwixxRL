@@ -147,15 +147,15 @@ class App(QtWidgets.QMainWindow, gui.Ui_MainWindow):
 
     def unreal_player_action(self) -> bool:
         if self.exec_main_move:
-            QtTest.QTest.qWait(5000)
-            print(self.player.name, "do main move")
-            actions = self.player.do_main_move(*self.dice_roll[1:])
-            print(actions)
-            QtTest.QTest.qWait(5000)
+            QtTest.QTest.qWait(1000)
+            self.player.do_main_move(*self.dice_roll[1:])
+            self.load_env()
+            QtTest.QTest.qWait(1000)
         else:
-            print(self.player.name, "do white move")
-            actions = self.player.downstream_move(self.dice_roll[1])
-            print(actions)
+            QtTest.QTest.qWait(1000)
+            self.player.downstream_move(self.dice_roll[1])
+            self.load_env()
+            QtTest.QTest.qWait(1000)
         return True
 
     def player_do_action(self) -> bool:
@@ -167,6 +167,7 @@ class App(QtWidgets.QMainWindow, gui.Ui_MainWindow):
             return True
 
     def continue_callback(self):
+        print("________________________")
         if self.game_env.is_game_over:
             return
         if not self.player_do_action():
@@ -184,10 +185,16 @@ class App(QtWidgets.QMainWindow, gui.Ui_MainWindow):
             if type(self.player).__name__ != "RealPlayer":
                 self.throw_dice_callback()
                 self.unreal_player_action()
+                print("done")
+                # self.continue_callback()
         else:
             self.exec_main_move = False
             self.load_env()
             self.current_player.setText(f"{self.player.name} do white move")
+            if type(self.player).__name__ != "RealPlayer":
+                self.unreal_player_action()
+                print("done")
+                # self.continue_callback()
         if self.game_env.is_game_over:
             print("GAME OVER")
             self.close()
