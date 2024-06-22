@@ -2,30 +2,29 @@ from ui_main import App
 from PyQt5.QtWidgets import QApplication
 import sys
 from collections import deque
-from agent import Agent, RealPlayer
+from agent import Agent
+from RealPlayer import RealPlayer
 from RL_agent import RLAgent
 from typing import Generator
-from environment import GameEnvironment, Environment
 
 
-GAME_ENVIRONMENT = GameEnvironment()
-PLAYERS: deque[Agent | RealPlayer | RLAgent] = deque((Agent("Finn", Environment(GAME_ENVIRONMENT)),
-                                                      Agent("Luisa", Environment(GAME_ENVIRONMENT))))
+PLAYERS: deque[Agent | RLAgent | RealPlayer] = deque([RealPlayer("Finn"),
+                                                      RLAgent("Luisa")])
 
 
-def next_player() -> Generator[Agent | RLAgent | RealPlayer, None, None]:
-    yield None
+def next_player() -> Generator[tuple[bool, Agent | RLAgent | RealPlayer], None, None]:
+    yield False, None
     players = PLAYERS.copy()
     while True:
-        for player in players:
-            yield player
+        for i, player in enumerate(players):
+            yield i == 0, player
         players.rotate(-1)
-        yield None
+        yield False, None
 
 
 def main_ui():
     app = QApplication(sys.argv)
-    form = App(players=PLAYERS, player_order=next_player(), game_env=GAME_ENVIRONMENT)
+    form = App(player_order=next_player())
     form.show()
     app.exec_()
 

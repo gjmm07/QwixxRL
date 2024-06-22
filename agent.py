@@ -1,15 +1,14 @@
 import numpy as np
-from environment import Environment, GameEnvironment, BOARD
+from environment import Environment, _GameEnvironment, BOARD
 from scipy import stats
+from Player import Player
 
 
-class Agent:
+class Agent(Player):
 
     def __init__(self,
-                 name: str,
-                 env: Environment):
-        self.name = name
-        self.env = env
+                 name: str):
+        super().__init__(name)
         self.dice_values = stats.norm.pdf(np.arange(2, 13), 7, 2.4152429348524986)
         self.dice_values = (self.dice_values - min(self.dice_values)) / (max(self.dice_values) - min(self.dice_values))
 
@@ -42,19 +41,16 @@ class Agent:
         :param white_dr: sum of the two white dices
         :return: move taken
         """
-        print("white dr")
-        print(white_dr)
         dists = self.env.dists
         dists += 1
         norm_dist = (np.where(BOARD - white_dr == 0)[1] - dists) / 10
         values = self.dice_values[[white_dr - 2] * 4] * alpha + norm_dist * (1 - alpha)
-        print(values)
         if np.all((values > threshold) | (norm_dist < 0)):
-            print("Nothing to take")
             return False
         valid_idx = np.where(values > 0)[0]
         idx = np.random.choice(valid_idx[values[valid_idx] == values[valid_idx].min()])
         self.env.take_move(idx, white_dr)
+        print("white ", idx, white_dr)
         return True
 
     def _check_colored_dice_rolls(self, color_dr: np.ndarray, alpha: float = 0.5, threshold: float = 0.5) -> bool:
@@ -64,7 +60,6 @@ class Agent:
         :param color_dr: numpy array containing the sum of each white dice with each colored dice
         :return: move taken
         """
-        print("color dr")
         dists = self.env.dists
         # dists[dists == -1] = -2
         dists += 1
@@ -75,8 +70,8 @@ class Agent:
             return False
         valid_idx = np.where(norm_dist >= 0)[0]
         idx = np.random.choice(valid_idx[values[valid_idx] == values[valid_idx].min()])
-        print(left_dist[1][idx], BOARD[left_dist[1][idx], left_dist[0][idx]])
         self.env.take_move(left_dist[1][idx], BOARD[left_dist[1][idx], left_dist[0][idx]])
+        print("color ", left_dist[1][idx], BOARD[left_dist[1][idx], left_dist[0][idx]])
         return True
 
     def print_total_score(self):
@@ -86,43 +81,6 @@ class Agent:
         print(self.env.compute_total_score())
 
     @property
-    def is_game_over(self) -> bool:
-        return self.env.game_over
-
-
-class RealPlayer:
-
-    CLOSED_ROWS = []
-
-    def __init__(self,
-                 name: str,
-                 env: Environment):
-        self.name = name
-        self.error_counter: int = 0
-        self.game_over: bool = False
-        self.env = env
-
-    def close_row(self, idx: int):
-        self.CLOSED_ROWS.append(idx)
-        if len(self.CLOSED_ROWS) >= 2:
-            self.game_over = True
-
-    def take_error(self):
-        self.error_counter += 1
-        if self.error_counter >= 4:
-            self.game_over = True
-
-    def print_total_score(self):
-        print(self.name)
-        print(self.env.compute_total_score())
-
-    @property
-    def is_game_over(self) -> bool:
-        return self.game_over
-
-
-if __name__ == "__main__":
-    agent = Agent("COM", Environment(GameEnvironment()))
-    agent.do_main_move(7, np.array([[3, 4], [5, 7], [12, 2], [12, 5]]))
-    agent.do_main_move(7, np.array([[3, 4], [5, 7], [12, 2], [12, 5]]))
+    def is_real(self):
+        return False
 

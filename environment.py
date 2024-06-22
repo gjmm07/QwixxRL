@@ -2,6 +2,7 @@ import numpy as np
 from operator import itemgetter
 from warnings import warn, showwarning
 from dice_roll import throw_dice
+from enum import Enum
 
 
 BOARD: np.ndarray = np.array([np.arange(2, 13),
@@ -9,8 +10,15 @@ BOARD: np.ndarray = np.array([np.arange(2, 13),
                               np.arange(2, 13)[::-1],
                               np.arange(2, 13)[::-1]])
 
+print(BOARD)
 
-class GameEnvironment:
+
+class ExtraType(Enum):
+    error = -1
+    blank = -2
+
+
+class _GameEnvironment:
 
     def __init__(self):
         self.CLOSED_ROWS: list[int] = []
@@ -133,12 +141,13 @@ class Environment:
         12: 78
     }
 
-    def __init__(self, game_env: GameEnvironment):
+    game_env = _GameEnvironment()
+
+    def __init__(self):
         self.sel_fields = np.zeros_like(BOARD).astype(bool)
         self.error_count: int = 0
         self.rows_closed_score = np.zeros((4, 1)).astype(bool)
         self.rows_closed_counter = 0
-        self.game_env = game_env
 
     def reset(self):
         self.sel_fields = np.zeros_like(BOARD).astype(bool)
@@ -146,8 +155,9 @@ class Environment:
         self.rows_closed_score = np.zeros((4, 1)).astype(bool)
         self.rows_closed_counter = 0
 
-    def get_possible_actions(self, white_dr: int,
-                             color_dr: np.ndarray):
+    def get_possible_actions(self,
+                             white_dr: int,
+                             color_dr: np.ndarray) -> tuple[list[list[tuple[int, int]]], list[bool]]:
         pos_white_actions, white_mask = _allowed_white_actions(self.n_slc_row,
                                                                self.dists,
                                                                white_dr,
@@ -174,7 +184,9 @@ class Environment:
         return pos_moves, mask
 
     def get_possible_white_actions(self, white_dr: int):
-        return _allowed_white_actions(self.n_slc_row, self.dists, white_dr, self.game_env.CLOSED_ROWS)
+        (a, b), mask = _allowed_white_actions(self.n_slc_row, self.dists, white_dr, self.game_env.CLOSED_ROWS)
+        poss_moves = [[x] for x in zip(a, b)]
+        return poss_moves, mask
 
     @property
     def n_slc_row(self):
@@ -192,37 +204,25 @@ class Environment:
         :param num: number to cross out - caution: does not correspond to the index
         :return:
         """
-        assert not self.game_env.is_game_over, "Game is over"
+        assert not Environment.game_env.is_game_over, "Game is over"
         assert 0 <= color <= 4, "color must be between 0 and 4"
         assert 2 <= num <= 12, "num must be between 2 and 12"
         assert self.error_count <= self.MAX_ERRORS, "More errors than allowed - Should be handled by game env"
         assert self.rows_closed_counter <= 2, "Already two rows closed game is over - Should be handled by game env"
-        assert color not in self.game_env.CLOSED_ROWS, "Row already closed"
+        assert color not in Environment.game_env.CLOSED_ROWS, "Row already closed"
         dist = self.dists[color]
         assert dist < np.where(BOARD == num)[1][color], "Move not allowed"
         if (color in (0, 1) and num == 12) or (color in (2, 3) and num == 2):
             assert np.count_nonzero(self.sel_fields[color, :]) >= 4, "Row not ready to close"
-            self.game_env.CLOSED_ROWS.append(color)
+            Environment.game_env.CLOSED_ROWS.append(color)
             self.rows_closed_score[color, :] = True
             self.rows_closed_counter += 1
         if self.rows_closed_counter >= 2:
-            self.game_env.PLAYER_ENDED_GAME = True
+            Environment.game_env.PLAYER_ENDED_GAME = True
         self.sel_fields[list(zip(*np.where(BOARD == num)))[color]] = True
 
-    def return_current_board(self) -> np.ndarray:
-        """
-        LEGACY
-        Returns the possible moves that may be taken by an agent. Puts -1 in fields which are not allowed
-        :return:
-        """
-        warn("Function is outdated", DeprecationWarning)
-        block_idx = np.where(np.any(self.sel_fields, axis=1),
-                             np.array([11, 11, 11, 11]) - np.argmax(self.sel_fields[:, ::-1],
-                                                                    axis=1), 0)[:, np.newaxis]
-        x = np.where(np.indices(self.BOARD.shape)[1] >= block_idx, self.BOARD, -1)
-        x[:, -1] = np.where(np.count_nonzero(self.sel_fields, axis=1) >= 4, self.BOARD[:, -1], -1)
-        x[self.CLOSED_ROWS, :] = -1
-        return x
+    def take_move_idx(self, rows, columns):
+        self.sel_fields[rows, columns] = True
 
     def compute_total_score(self):
         return (sum(itemgetter(*np.count_nonzero(
@@ -232,18 +232,14 @@ class Environment:
     def take_error(self):
         self.error_count += 1
         if self.error_count >= self.MAX_ERRORS:
-            self.game_env.PLAYER_ENDED_GAME = True
+            Environment.game_env.PLAYER_ENDED_GAME = True
 
 
 if __name__ == "__main__":
-    ge = GameEnvironment()
-    env = Environment(ge)
-    env.take_move(1, 2)
-    env.take_move(1, 3)
-    env.take_move(0, 4)
-    ge.CLOSED_ROWS.append(0)
-    env.take_move(1, 5)
-    env.take_move(1, 6)
-    _, white_dice, color_dice = throw_dice()
-    print(white_dice)
-    env.get_possible_actions(white_dice, color_dice)
+    env = Environment()
+    # print(env.get_possible_actions(9, np.array([[ 6,  7], [ 8,  9], [ 9, 10], [ 7,  8]])))
+    # #[(0, 7), (0, 4)]
+    # env.take_move_idx([0, 0], [7, 4])
+    # print(env.sel_fields)
+    print(BOARD)
+    print(env.get_possible_white_actions(5))
