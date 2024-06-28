@@ -23,7 +23,7 @@ class Agent(Player):
         # print(color_dr)
         # CHECK COLORED DICE ROLLS
         col_move_taken = self._check_colored_dice_rolls(color_dr)
-        if self.env.game_env.is_game_over:
+        if self.env._game_env.is_game_over:
             return
         # # CHECK WHITE DICE ROLL
         w_move_taken = self._check_white_dice_roll(white_dr)

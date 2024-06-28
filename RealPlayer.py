@@ -11,9 +11,11 @@ class RealPlayer(Player):
                  name: str):
         super().__init__(name)
 
-    def print_total_score(self):
+    def _get_total_score(self):
         print(self.name)
-        print(self.env.compute_total_score())
+        total_score = self.env.compute_total_score()
+        print(total_score)
+        return total_score
 
     def take_action(self,
                     moves: list[tuple[int, int]] | ExtraType,
@@ -30,8 +32,14 @@ class RealPlayer(Player):
             poss_moves, mask = self.env.get_possible_actions(white_dr, color_dr)
         else:
             poss_moves, mask = self.env.get_possible_white_actions(white_dr)
-        assert moves in (pm for pm, contain in zip(poss_moves, mask) if contain), "wrong selection"
+        assert set(moves) in (set(pm) for pm, contain in zip(poss_moves, mask) if contain), "wrong selection"
         super().take_action(moves)
+
+    def end_game_callback(self):
+        return self._get_total_score()
+
+    def reset_callback(self):
+        self.env.reset()
 
     @property
     def is_real(self):

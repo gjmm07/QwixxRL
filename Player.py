@@ -15,6 +15,7 @@ class Player:
                     white_dr: int = 0,
                     color_dr: np.ndarray = None):
         if isinstance(moves, ExtraType):
+            assert not first_player and moves == ExtraType.error, "No error if white move"
             if moves == ExtraType.error:
                 self.env.take_error()
             return
