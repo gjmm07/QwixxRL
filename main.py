@@ -7,6 +7,7 @@ from RealPlayer import RealPlayer
 from RL_agent import RLAgent
 from typing import Generator
 from dice_roll import throw_dice
+from collections import Counter
 
 
 PLAYERS: deque[Agent | RLAgent | RealPlayer] = deque([RLAgent("Finn"),
@@ -19,6 +20,12 @@ def next_player() -> Generator[tuple[bool, Agent | RLAgent | RealPlayer], None, 
         for i, player in enumerate(players):
             yield i == 0, player
         players.rotate(-1)
+
+
+def _print_depth(base_node):
+    print(len(base_node.children))
+    for child in base_node.children:
+        _print_depth(child)
 
 
 def train_rl_agent(n_games: int):
@@ -34,20 +41,22 @@ def train_rl_agent(n_games: int):
                 player.downstream_move(dice_roll[1])
                 if player.env.is_game_over:
                     break
-        scores = _compute_score()
+        scores = _compute_score(game)
         _execute_backpropagation(scores)
+    print([(x.action, x.value) for x in PLAYERS[1].base_node.children])
 
 
-def _compute_score():
+def _compute_score(i: int, print_every: int = 100):
     total_score = []
     for player in PLAYERS:
         total_score.append(player.end_game_callback())
+    if not i % print_every:
+        print(i, total_score)
     return [int(ts == max(total_score)) for ts in total_score]
 
 
 def _execute_backpropagation(scores: list[int], reset_players: bool = True):
     for score, player in zip(scores, PLAYERS):
-        print(player.name)
         player.backpropagation(score)
         if reset_players:
             player.reset_callback()
@@ -64,5 +73,5 @@ def main_ui():
 
 
 if __name__ == "__main__":
-    train_rl_agent(50)
+    train_rl_agent(100_000)
 

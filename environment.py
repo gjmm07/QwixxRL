@@ -248,7 +248,7 @@ class Environment:
 
     def take_error(self):
         self.error_count += 1
-        print("TAKE ERROR", self.error_count)
+        # print("TAKE ERROR", self.error_count)
         if self.error_count >= self.MAX_ERRORS:
             Environment._game_env.player_end_game()
 
