@@ -2,10 +2,10 @@ import time
 from PyQt5 import QtCore, QtGui, QtWidgets, QtTest
 import gui
 import numpy as np
-from agent import Agent
+from stats_palyer import Agent
 from RealPlayer import RealPlayer
 from collections import deque
-from RL_agent import RLAgent
+from MC_RL_agent import RLAgent
 from typing import Generator
 from dice_roll import throw_dice
 from functools import partial
@@ -95,6 +95,7 @@ class App(QtWidgets.QMainWindow, gui.Ui_MainWindow):
             if self._is_first_player:
                 actions = self.player.do_main_move(*self.dice_roll[1:])
             else:
+                print(self.dice_roll)
                 actions = self.player.downstream_move(self.dice_roll[1])
             for _ in range(5):
                 yield
@@ -117,6 +118,8 @@ class App(QtWidgets.QMainWindow, gui.Ui_MainWindow):
                 next(self._unreal_player_gen)
             return
         self._is_first_player, self.player = next(self.player_order)
+        if self.player is None:
+            return  # new round
         if self._is_first_player:
             print("New round")
             self._new_round = True

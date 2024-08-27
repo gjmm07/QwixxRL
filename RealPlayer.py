@@ -22,9 +22,10 @@ class RealPlayer(Player):
                     first_player: bool = False,
                     white_dr: int = 0,
                     color_dr: np.ndarray = None):
+        # todo: check if move is allowed
         print(moves)
         if ExtraType.error in moves:
-            self.env.take_error()
+            super().take_action(ExtraType.error)
             return
         elif not first_player and (ExtraType.blank in moves or not moves):
             return

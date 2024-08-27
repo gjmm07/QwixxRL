@@ -209,30 +209,6 @@ class Environment:
         return (self.sel_fields.shape[1] - 1 - np.argmax(self.sel_fields[:, ::-1], axis=1) -
                 (~np.any(self.sel_fields, axis=1) * self.sel_fields.shape[1]))
 
-    def take_move(self, color: int, num: int):
-        """
-        Take a move in the environment
-        :param color: as int 0: red, 1: yellow, 2: green, 3: blue
-        :param num: number to cross out - caution: does not correspond to the index
-        :return:
-        """
-        assert not Environment._game_env.is_game_over, "Game is over"
-        assert 0 <= color <= 4, "color must be between 0 and 4"
-        assert 2 <= num <= 12, "num must be between 2 and 12"
-        assert self.error_count <= self.MAX_ERRORS, "More errors than allowed - Should be handled by game env"
-        assert self.rows_closed_counter <= 2, "Already two rows closed game is over - Should be handled by game env"
-        assert color not in Environment._game_env.__CLOSED_ROWS, "Row already closed"
-        dist = self.dists[color]
-        assert dist < np.where(BOARD == num)[1][color], "Move not allowed"
-        if (color in (0, 1) and num == 12) or (color in (2, 3) and num == 2):
-            assert np.count_nonzero(self.sel_fields[color, :]) >= 4, "Row not ready to close"
-            Environment._game_env.__CLOSED_ROWS.append(color)
-            self.rows_closed_score[color, :] = True
-            self.rows_closed_counter += 1
-        if self.rows_closed_counter >= 2:
-            Environment._game_env.GAME_OVER = True
-        self.sel_fields[list(zip(*np.where(BOARD == num)))[color]] = True
-
     def take_move_idx(self, rows: tuple[int, ...], columns: tuple[int, ...]) -> None:
         # Environment.game_env.__CLOSED_ROWS += [row for row, col in zip(rows, columns) if col == BOARD.shape[1] - 1]
         for row, col in zip(rows, columns):
