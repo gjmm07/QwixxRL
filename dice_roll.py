@@ -1,7 +1,11 @@
 import numpy as np
 
 
-def throw_dice() -> tuple[np.ndarray, int, np.ndarray]:
+def throw_dice() -> np.ndarray:
     dices = np.random.randint(1, 7, (6,))
-    return dices, np.sum(dices[:2]), dices[np.newaxis, :2] + dices[2:, np.newaxis]
+    return dices
+
+
+def get_moves(dices: np.ndarray) -> tuple[int, np.ndarray]:
+    return np.sum(dices[:2]), dices[np.newaxis, :2] + dices[2:, np.newaxis]
 

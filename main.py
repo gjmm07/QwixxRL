@@ -11,11 +11,10 @@ from dice_roll import throw_dice
 
 
 class PlayerGenerator:
+    PLAYERS: deque[DQLAgent | RealPlayer] = deque([DQLAgent("Finn"),
+                                                   DQLAgent("Luisa")])
 
-    PLAYERS: deque[DQLAgent | RLAgent | RealPlayer] = deque([DQLAgent("Finn"),
-                                                             DQLAgent("Luisa")])
-
-    def next_player(self) -> Generator[tuple[bool, Agent | RLAgent | RealPlayer], None, None]:
+    def next_player(self) -> Generator[tuple[bool, DQLAgent | RealPlayer], None, None]:
         """
         :return:
         """
@@ -43,17 +42,18 @@ def sim_main(n_games: int = 10):
             if player.is_game_over:
                 break
             if first:
-                _, wdr, cdr = throw_dice()
-                player.do_main_move(wdr, cdr)
+                dr = throw_dice()
+                player.do_main_move(dr)
             else:
-                player.downstream_move(wdr)
-        for p in pg.PLAYERS:
-            p.end_game_callback()
+                player.downstream_move(dr)
+        scores = [p.env.compute_total_score() for p in pg.PLAYERS]
+        for p, winner in zip(pg.PLAYERS, [x == max(scores) for x in scores]):
+            p.end_game_callback(100 if winner else 0)  # reward the winner extra
         pg.new_round()
 
 
 def main():
-    if any(type(p) == RealPlayer for p in pg.PLAYERS):
+    if any(type(p) is RealPlayer for p in pg.PLAYERS):
         app = QApplication(sys.argv)
         form = App(player_order=pg.next_player())
         form.show()
@@ -64,6 +64,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
