@@ -32,7 +32,7 @@ class PlayerGenerator:
 pg = PlayerGenerator()
 
 
-def sim_main(n_games: int = 10):
+def sim_main(n_games: int = 1000):
     for game in range(n_games):
         for first, player in pg.next_player():
             if player is None:
@@ -47,6 +47,7 @@ def sim_main(n_games: int = 10):
             else:
                 player.downstream_move(dr)
         scores = [p.env.compute_total_score() for p in pg.PLAYERS]
+        print("######")
         for p, winner in zip(pg.PLAYERS, [x == max(scores) for x in scores]):
             p.end_game_callback(100 if winner else 0)  # reward the winner extra
         pg.new_round()
