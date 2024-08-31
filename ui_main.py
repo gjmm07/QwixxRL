@@ -1,8 +1,7 @@
-import time
+from __future__ import annotations
 from PyQt5 import QtCore, QtGui, QtWidgets, QtTest
 import gui
 import numpy as np
-from stats_palyer import Agent
 from RealPlayer import RealPlayer
 from collections import deque
 from MC_RL_agent import RLAgent
@@ -11,7 +10,9 @@ from dice_roll import throw_dice
 from functools import partial
 from environment import BOARD, ExtraType
 import itertools
-from typing import Literal
+from typing import Literal, TYPE_CHECKING
+if TYPE_CHECKING:
+    from main import PlayerSetup
 
 # pyuic5 /home/linux/helloworld.ui -o helloworld.py
 
@@ -21,7 +22,7 @@ class App(QtWidgets.QMainWindow, gui.Ui_MainWindow):
     LOOKUP_COLORS: dict[str, int] = {"red": 0, "yellow": 1, "green": 2, "blue": 3}
 
     def __init__(self,
-                 player_order: Generator[tuple[bool, RealPlayer | RLAgent], None, None],
+                 player_setup: PlayerSetup,
                  parent=None):
 
         super().__init__(parent)
@@ -56,10 +57,11 @@ class App(QtWidgets.QMainWindow, gui.Ui_MainWindow):
 
         self.dice_labels: list[QtWidgets.QLabel] = [self.White_dice_1, self.White_dice_2, self.Red_dice,
                                                     self.Yellow_dice, self.Green_dice, self.Blue_dice]
-        self.player_order = player_order
+        self.player_gen = player_setup.next_gen()
+        self._player_setup = player_setup
         self.player: RLAgent | RealPlayer | None = None
 
-        self.dice_roll: tuple[np.ndarray, int, np.ndarray] = (-np.ones((6, )).astype(int), 0, np.zeros(0, ))
+        self.dice_roll: tuple[np.ndarray] = -np.ones((6, )).astype(int)
         self.history: deque[np.ndarray] = deque(maxlen=3)
 
         self.exec_main_move: bool = True
@@ -83,23 +85,24 @@ class App(QtWidgets.QMainWindow, gui.Ui_MainWindow):
             but.setStyleSheet(f"background-color: {orig_color}")
             yield
 
+    @staticmethod
+    def _wait(x: int):
+        for _ in range(x):
+            yield
+
     def unreal_player_action(self):
         while True:
-            for _ in range(10):
-                yield
+            yield from self._wait(5)
             if self._is_first_player:
                 self.dice_roll = throw_dice()
             self.display_dice()
-            for _ in range(30):
-                yield
+            yield from self._wait(15)
             if self._is_first_player:
-                actions = self.player.do_main_move(*self.dice_roll[1:])
+                actions = self.player.do_main_move(self.dice_roll)
             else:
-                print(self.dice_roll)
-                actions = self.player.downstream_move(self.dice_roll[1])
-            for _ in range(5):
-                yield
-            if actions is None:
+                actions = self.player.downstream_move(self.dice_roll)
+            yield from self._wait(10)
+            if isinstance(actions, ExtraType):
                 if self._is_first_player:
                     self.error_widgets[self.player.env.error_count - 1].setChecked(True)
                     yield from self.blinking_button(self.error_widgets[self.player.env.error_count - 1], "red")
@@ -107,8 +110,7 @@ class App(QtWidgets.QMainWindow, gui.Ui_MainWindow):
                 for a in actions:
                     self.grid[a[0]][a[1]].setChecked(True)
                     yield from self.blinking_button(self.grid[a[0]][a[1]], "white")
-            for _ in range(80):
-                yield
+            yield from self._wait(20)
             self._lock = False
             yield
 
@@ -117,11 +119,12 @@ class App(QtWidgets.QMainWindow, gui.Ui_MainWindow):
             if not self.player.is_real:
                 next(self._unreal_player_gen)
             return
-        self._is_first_player, self.player = next(self.player_order)
+        self._is_first_player, self.player = next(self.player_gen)
         if self.player is None:
-            return  # new round
+            self._player_setup.end_round()
+            return
         if self._is_first_player:
-            print("New round")
+            self._player_setup.start_round()
             self._new_round = True
             self._lock = False
         if self._new_round:
@@ -131,7 +134,7 @@ class App(QtWidgets.QMainWindow, gui.Ui_MainWindow):
         self.setup_player()
         if self.player.env.is_game_over:
             # todo: Properly end game and reset
-            print("Game Over")
+            self._player_setup.end_game()
             self.qTimer.stop()
             return
         self._lock = True
@@ -139,11 +142,12 @@ class App(QtWidgets.QMainWindow, gui.Ui_MainWindow):
     def continue_callback(self):
         if self.player is None or not self.player.is_real:
             return
-        try:
-            self.player.take_action(self.sel_moves, self._is_first_player, *self.dice_roll[1:])
-        except AssertionError as ae:
-            print(ae)
-            return
+        if not self.sel_moves:
+            self.player.take_action(ExtraType.blank)
+        elif ExtraType.error in self.sel_moves:
+            self.player.take_action(ExtraType.error)
+        else:
+            self.player.take_action(self.sel_moves)
         self.sel_moves = []
         self._lock = False
 
@@ -182,7 +186,6 @@ class App(QtWidgets.QMainWindow, gui.Ui_MainWindow):
         self._load_error_grid()
 
     def get_moves(self, child: QtWidgets.QCheckBox, color, num):
-        print(color, num)
         sel = child.isChecked()
         if sel:
             self.sel_moves.append((color, num))
@@ -196,7 +199,7 @@ class App(QtWidgets.QMainWindow, gui.Ui_MainWindow):
             self.sel_moves.remove(ExtraType.error)
 
     def display_dice(self):
-        for i, (d_label, dice) in enumerate(zip(self.dice_labels, self.dice_roll[0])):
+        for i, (d_label, dice) in enumerate(zip(self.dice_labels, self.dice_roll)):
             if dice == -1 or i in (d + 2 for d in self.player.env.closed_rows):
                 d_label.setPixmap(self.black_img)
             else:

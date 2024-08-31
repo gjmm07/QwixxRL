@@ -6,7 +6,7 @@ import typing
 import numpy as np
 import pickle
 import os
-from Player import Player
+from _Player import _Player
 from environment import ExtraType
 import random
 
@@ -73,7 +73,7 @@ def get_random_action(possible_actions: list[list[tuple[int, int]]],
     return possible_actions[idx]
 
 
-class RLAgent(Player):
+class RLAgent(_Player):
 
     def __init__(self, name: str):
         super().__init__(name)

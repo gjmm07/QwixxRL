@@ -1,10 +1,10 @@
 import numpy as np
 from environment import Environment, _GameEnvironment, BOARD
 from scipy import stats
-from Player import Player
+from _Player import _Player
 
 
-class Agent(Player):
+class Agent(_Player):
 
     def __init__(self,
                  name: str):
