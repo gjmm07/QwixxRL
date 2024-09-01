@@ -19,7 +19,10 @@ class Memory:
     dice_roll: np.ndarray
 
     next_map: np.ndarray = None
+    next_allowed: list[bool] = None
     next_error_count: int = None
+    next_dice_roll: np.ndarray = None
+
     action: int = None
     reward: int = None
     terminate: bool = None
@@ -30,9 +33,7 @@ class Memory:
 
     @property
     def next_state(self):
-        dice_roll = throw_dice()
-        dice_roll[:2].sort()
-        return np.hstack((self.next_map.ravel(), np.atleast_1d(self.next_error_count), dice_roll / 6))
+        return np.hstack((self.next_map.ravel(), np.atleast_1d(self.next_error_count), self.next_dice_roll / 6))
 
 
 class Networks:
@@ -47,17 +48,19 @@ class Networks:
 
         self._policy_net: Sequential = tf.keras.models.clone_model(self._target_net)
         self._n_output = output
-        self.optimizer = keras.optimizers.Adam(learning_rate=1e-3)
+        self.optimizer = keras.optimizers.Adam(learning_rate=1e-5)
 
     def train(self, replay_memory: typing.Sequence[Memory]):
-        batch_size = 500
+        batch_size = 150
         if len(replay_memory) < batch_size:
             batch_size = len(replay_memory)
         batch = random.sample(replay_memory, batch_size)
-        states, next_states, actions, rewards, term = zip(
-            *((r.state, r.next_state, r.action, r.reward, r.terminate) for r in batch))
-        q_s_a_prime = np.max(self._target_net(np.vstack(next_states), training=True), axis=1)
-        q_s_a_target = np.where(term, rewards, rewards + 0.8 * q_s_a_prime)
+        states, next_states, next_allowed, actions, rewards, term = zip(
+            *((r.state, r.next_state, r.next_allowed, r.action, r.reward, r.terminate) for r in batch))
+        q_s_a_prime = np.max(
+            self._target_net(
+                np.vstack(next_states), training=True), axis=1, where=next_allowed, initial=-1)
+        q_s_a_target = np.where(term, rewards, rewards + 0.9 * q_s_a_prime)
         q_s_a_target = tf.convert_to_tensor(q_s_a_target, dtype="float32")
         with tf.GradientTape() as tape:
             q_s_a = tf.reduce_sum(
@@ -139,12 +142,17 @@ class DQLAgent(_Player):
     def _add_to_replay(self, reward: int, terminate: bool = False):
         if self._type == "downstream":
             return
-        else:
-            self._memory.next_map = self.env.sel_fields.astype(int)
-            self._memory.next_error_count = self.env.error_count / 4
-            self._memory.reward = reward
-            self._memory.terminate = terminate
-            DQLAgent.replay_memory.append(self._memory)
+        self._memory.next_map = self.env.sel_fields.astype(int)
+        self._memory.next_error_count = self.env.error_count / 4
+        dice_roll = throw_dice()
+        dice_roll[:2].sort()
+        _, next_allowed = self.env.get_possible_actions(*get_moves(dice_roll))
+        next_allowed += (True, )
+        self._memory.next_allowed = next_allowed
+        self._memory.next_dice_roll = dice_roll
+        self._memory.reward = reward
+        self._memory.terminate = terminate
+        DQLAgent.replay_memory.append(self._memory)
 
     def end_round_callback(self):
         return

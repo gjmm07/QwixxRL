@@ -48,10 +48,10 @@ class PlayerSetup:
 
 
 pg = PlayerSetup()
-nets = Networks((51, ), 45, (32, 8, 32))
+nets = Networks((51, ), 45, (32, 16, 8, 16, 32))
 
 
-def sim_main(n_games: int = 1):
+def sim_main(n_games: int = 100_000):
     epsilon = 1
     avg_scores = []
     for game in range(n_games):
@@ -68,13 +68,14 @@ def sim_main(n_games: int = 1):
             else:
                 player.downstream_move(dr)
         scores = pg.end_game()
-        avg_scores.append(np.mean(scores))
+        avg_scores.append(scores)
         nets.train(DQLAgent.replay_memory)
         if not game % 100:
             print(f"{round(epsilon, 2)} \t {avg_scores[-1]}")
             nets.copy_weights()
         epsilon -= 1 / n_games
-    plt.plot(avg_scores)
+    for l in zip(*avg_scores):
+        plt.plot(l, linewidth=.5)
     plt.show()
 
 
