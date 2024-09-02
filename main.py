@@ -5,7 +5,7 @@ from collections import deque
 from stats_palyer import Agent
 from RealPlayer import RealPlayer
 from MC_RL_agent import RLAgent
-from DQL_agent import DQLAgent, Networks, Memory, MemorySmallState
+from DQL_agent import DQLAgent, Networks, Memory, MemorySmallState, CNNMemory, CNNNetworks
 from typing import Generator
 from dice_roll import throw_dice
 from matplotlib import pyplot as plt
@@ -14,7 +14,8 @@ from scipy.ndimage import uniform_filter1d
 
 
 # nets = Networks((15, ), 13, (64, 16, 8, 64))
-nets = Networks((51, ), 13, (128, 64, 16, 64, 128))
+# nets = Networks((51, ), 13, (128, 64, 16, 64, 128))
+nets = CNNNetworks()
 replay_memory: deque[Memory] = deque([], maxlen=1000)
 
 
@@ -35,8 +36,8 @@ class PlayerSetup:
 
     @staticmethod
     def end_game():
-        scores = [p.env.compute_total_score() for p in pg.PLAYERS]
-        for p, winner in zip(pg.PLAYERS, [x == max(scores) for x in scores]):
+        scores = [p.env.compute_total_score() for p in PlayerSetup.PLAYERS]
+        for p, winner in zip(PlayerSetup.PLAYERS, [x == max(scores) for x in scores]):
             p.end_game_callback(10 if winner else 0)  # reward the winner extra
             # todo: include amount of moves made as reward?
         PlayerSetup.PLAYERS.rotate(-1)
@@ -56,7 +57,7 @@ class PlayerSetup:
 pg = PlayerSetup()
 
 
-def sim_main(n_games: int = 500_000):
+def sim_main(n_games: int = 1000):
     epsilon = 1
     avg_scores = []
     for game in range(n_games):

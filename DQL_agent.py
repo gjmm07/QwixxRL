@@ -1,4 +1,5 @@
 import keras.optimizers
+from keras.src.layers import Conv2D, MaxPooling2D, Flatten, Concatenate, Conv1D, MaxPooling1D
 from _Player import _Player
 import numpy as np
 from environment import ExtraType, dists, n_slc_row
@@ -7,7 +8,7 @@ from collections import deque
 from dataclasses import dataclass
 import typing
 import random
-from keras import Sequential
+from keras import Sequential, Model
 from keras.layers import Dense, Input
 import tensorflow as tf
 import copy
@@ -63,6 +64,26 @@ class MemorySmallState(Memory):
              self.next_dice_roll / 6))
 
 
+@dataclass
+class CNNMemory(Memory):
+
+    @property
+    def state(self):
+        return self.map, np.hstack((np.atleast_1d(self.error_count), self.dice_roll))
+
+    @property
+    def next_state(self):
+        return self.next_map, np.hstack((np.atleast_1d(self.next_error_count), self.next_dice_roll / 6))
+
+
+def sample_replay_memory(replay_memory: typing.Sequence[Memory]):
+    batch_size = 150
+    if len(replay_memory) < batch_size:
+        batch_size = len(replay_memory)
+    batch = random.sample(replay_memory, batch_size)
+    return zip(*((r.state, r.next_state, r.next_allowed, r.action, r.reward, r.terminate) for r in batch))
+
+
 class Networks:
     loss_fn = tf.keras.losses.MeanSquaredError()
 
@@ -100,12 +121,7 @@ class Networks:
     #     self.optimizer.apply_gradients(zip(grads, self._policy_net.trainable_weights))
 
     def train(self, replay_memory: typing.Sequence[Memory]):
-        batch_size = 150
-        if len(replay_memory) < batch_size:
-            batch_size = len(replay_memory)
-        batch = random.sample(replay_memory, batch_size)
-        states, next_states, next_allowed, actions, rewards, term = zip(
-            *((r.state, r.next_state, r.next_allowed, r.action, r.reward, r.terminate) for r in batch))
+        states, next_states, next_allowed, actions, rewards, term = sample_replay_memory(replay_memory)
         states = np.array(states)
         qsa_prime = np.max(
             self._target_net.predict(np.array(next_states), verbose=0), axis=1, where=next_allowed, initial=-1)
@@ -118,8 +134,54 @@ class Networks:
     def copy_weights(self):
         self._target_net.set_weights(self._policy_net.get_weights())
 
-    def get_best_action(self, state, allowed: tuple[bool]):
+    def get_best_action(self, state: Memory.state, allowed: tuple[bool]):
+        state = np.atleast_2d(state)
         pred = self._policy_net.predict(state, verbose=False)
+        pred = pred[0]
+        valid_idx = np.where(allowed)[0]
+        return valid_idx[np.argmax(pred[valid_idx])]
+
+
+class CNNNetworks:
+    loss_fn = tf.keras.losses.MeanSquaredError()
+
+    def __init__(self):
+        input1 = Input(shape=(4, 11, 1))
+        x1 = Conv2D(16, (2, 5), activation="relu")(input1)
+        # x1 = Conv1D(2, 3, activation="relu")(x1)
+        x1 = MaxPooling2D((2, 2))(x1)
+        x1 = Flatten()(x1)
+
+        input2 = Input(shape=(7, ))
+        x2 = Dense(32, activation="relu")(input2)
+        x2 = Dense(8, activation="relu")(x2)
+
+        concat = Concatenate()([x1, x2])
+        out = Dense(13, activation="softmax")(concat)
+        self._target_net = Model(inputs=[input1, input2], outputs=out)
+        self._policy_net: Model = tf.keras.models.clone_model(self._target_net)
+        self._target_net.compile(loss=self.loss_fn, optimizer="adam")
+        self._policy_net.compile(loss=self.loss_fn, optimizer="adam")
+
+    def copy_weights(self):
+        self._target_net.set_weights(self._policy_net.get_weights())
+
+    def train(self, replay_memory: typing.Sequence[Memory]):
+        states, next_states, next_allowed, actions, rewards, term = sample_replay_memory(replay_memory)
+        map_, state = (np.array(x) for x in zip(*states))
+        next_map, next_state = (np.array(x) for x in zip(*next_states))
+
+        qsa_prime = np.max(
+            self._target_net.predict([next_map, next_state], verbose=0), axis=1, where=next_allowed, initial=-1)
+        qsa = self._policy_net.predict([map_, state], verbose=0)
+        np.put_along_axis(
+            qsa, np.atleast_2d(actions).T, np.atleast_2d(np.where(term, rewards, rewards + 0.99 * qsa_prime)).T, axis=1)
+        x = self._policy_net.train_on_batch([map_, state], qsa)
+        print(x)
+
+    def get_best_action(self, state: Memory.state, allowed: tuple[bool]):
+        map_, state = (np.array(x)[np.newaxis, ...] for x in state)
+        pred = self._policy_net.predict([map_, state], verbose=False)
         pred = pred[0]
         valid_idx = np.where(allowed)[0]
         return valid_idx[np.argmax(pred[valid_idx])]
@@ -134,7 +196,7 @@ class DQLAgent(_Player):
         self._type: typing.Literal["main", "downstream"] = "main"
         self._first_round = True
         self._replay_memory = replay_memory
-        self._memory: Memory = Memory(np.empty((1, )), -100, np.empty((1, )))
+        self._memory: Memory = CNNMemory(np.empty((1, )), -100, np.empty((1, )))
 
     def do_main_move(self, dice_roll: np.ndarray, net: Networks, epsilon: float):
         """
@@ -153,7 +215,7 @@ class DQLAgent(_Player):
         if random.random() < epsilon:
             action_idx = self._select_random_action(allowed)
         else:
-            action_idx = net.get_best_action(np.atleast_2d(self._memory.state), allowed)
+            action_idx = net.get_best_action(self._memory.state, allowed)
         self._memory.action = action_idx
         action = moves[action_idx]
         super().take_action(action)
