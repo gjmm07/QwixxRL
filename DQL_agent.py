@@ -1,7 +1,7 @@
 import keras.optimizers
 from _Player import _Player
 import numpy as np
-from environment import ExtraType
+from environment import ExtraType, dists, n_slc_row
 from dice_roll import get_moves, throw_dice
 from collections import deque
 from dataclasses import dataclass
@@ -10,6 +10,7 @@ import random
 from keras import Sequential
 from keras.layers import Dense, Input
 import tensorflow as tf
+import copy
 
 
 @dataclass
@@ -29,11 +30,37 @@ class Memory:
 
     @property
     def state(self):
+        """
+        state: 44 bool for each field + error count + 6 dices (2 white (sorted) 4 color) = 51
+        :return:
+        """
         return np.hstack((self.map.ravel(), np.atleast_1d(self.error_count), self.dice_roll))
 
     @property
     def next_state(self):
         return np.hstack((self.next_map.ravel(), np.atleast_1d(self.next_error_count), self.next_dice_roll / 6))
+
+
+@dataclass
+class MemorySmallState(Memory):
+
+    @property
+    def state(self):
+        """
+        The state space is significantly smaller because instead of passing the whole map the distances to
+        the furthest right cross and the amount of crosses per row is returned
+        --> 4 distances, 4 crosses per row, error count, dice roll (6) = 15
+        :return:
+        """
+        return np.hstack(
+            ((dists(self.map) + 1) / 12, n_slc_row(self.map) / 11, np.atleast_1d(self.error_count), self.dice_roll))
+
+    @property
+    def next_state(self):
+        return np.hstack(
+            ((dists(self.next_map) + 1) / 12, n_slc_row(self.next_map) / 11,
+             np.atleast_1d(self.next_error_count),
+             self.next_dice_roll / 6))
 
 
 class Networks:
@@ -47,8 +74,30 @@ class Networks:
         self._target_net.add(Dense(output, activation="linear"))
 
         self._policy_net: Sequential = tf.keras.models.clone_model(self._target_net)
+
+        self._target_net.compile(keras.optimizers.Adam(learning_rate=1e-4), loss=self.loss_fn)
+        self._policy_net.compile(keras.optimizers.Adam(learning_rate=1e-4), loss=self.loss_fn)
         self._n_output = output
-        self.optimizer = keras.optimizers.Adam(learning_rate=1e-5)
+        # self.optimizer = keras.optimizers.Adam(learning_rate=1e-5)
+
+    # def train(self, replay_memory: typing.Sequence[Memory]):
+    #     batch_size = 150
+    #     if len(replay_memory) < batch_size:
+    #         batch_size = len(replay_memory)
+    #     batch = random.sample(replay_memory, batch_size)
+    #     states, next_states, next_allowed, actions, rewards, term = zip(
+    #         *((r.state, r.next_state, r.next_allowed, r.action, r.reward, r.terminate) for r in batch))
+    #     q_s_a_prime = np.max(
+    #         self._target_net(
+    #             np.vstack(next_states), training=True), axis=1, where=next_allowed, initial=-1)
+    #     q_s_a_target = np.where(term, rewards, rewards + 0.9 * q_s_a_prime)
+    #     q_s_a_target = tf.convert_to_tensor(q_s_a_target, dtype="float32")
+    #     with tf.GradientTape() as tape:
+    #         q_s_a = tf.reduce_sum(
+    #             self._policy_net(np.vstack(states)) * tf.one_hot(actions, self._n_output), axis=1)
+    #         loss = Networks.loss_fn(q_s_a_target, q_s_a)
+    #     grads = tape.gradient(loss, self._policy_net.trainable_weights)
+    #     self.optimizer.apply_gradients(zip(grads, self._policy_net.trainable_weights))
 
     def train(self, replay_memory: typing.Sequence[Memory]):
         batch_size = 150
@@ -57,17 +106,14 @@ class Networks:
         batch = random.sample(replay_memory, batch_size)
         states, next_states, next_allowed, actions, rewards, term = zip(
             *((r.state, r.next_state, r.next_allowed, r.action, r.reward, r.terminate) for r in batch))
-        q_s_a_prime = np.max(
-            self._target_net(
-                np.vstack(next_states), training=True), axis=1, where=next_allowed, initial=-1)
-        q_s_a_target = np.where(term, rewards, rewards + 0.9 * q_s_a_prime)
-        q_s_a_target = tf.convert_to_tensor(q_s_a_target, dtype="float32")
-        with tf.GradientTape() as tape:
-            q_s_a = tf.reduce_sum(
-                self._policy_net(np.vstack(states)) * tf.one_hot(actions, self._n_output), axis=1)
-            loss = Networks.loss_fn(q_s_a_target, q_s_a)
-        grads = tape.gradient(loss, self._policy_net.trainable_weights)
-        self.optimizer.apply_gradients(zip(grads, self._policy_net.trainable_weights))
+        states = np.array(states)
+        qsa_prime = np.max(
+            self._target_net.predict(np.array(next_states), verbose=0), axis=1, where=next_allowed, initial=-1)
+        qsa = self._policy_net.predict(states, verbose=0)
+        np.put_along_axis(
+            qsa, np.atleast_2d(actions).T, np.atleast_2d(np.where(term, rewards, rewards + 0.99 * qsa_prime)).T, axis=1)
+        x = self._policy_net.train_on_batch(states, qsa)
+        print(x)
 
     def copy_weights(self):
         self._target_net.set_weights(self._policy_net.get_weights())
@@ -80,20 +126,18 @@ class Networks:
 
 
 class DQLAgent(_Player):
-    replay_memory: deque[Memory] = deque([], maxlen=1000)
     games: int = 0
 
-    def __init__(self, name: str):
+    def __init__(self, name: str, replay_memory: deque[Memory]):
         super().__init__(name)
         self._score: int = 0
         self._type: typing.Literal["main", "downstream"] = "main"
         self._first_round = True
-
+        self._replay_memory = replay_memory
         self._memory: Memory = Memory(np.empty((1, )), -100, np.empty((1, )))
 
     def do_main_move(self, dice_roll: np.ndarray, net: Networks, epsilon: float):
         """
-        state: 44 bool for each field + error count + 6 dices (2 white (sorted) 4 color) = 51
         (4, 2) single color actions, 4 white actions, combo moves and error = 45 possible moves
         in combination with 2⁴⁴ possible states this is impossible to model in a q-table
         """
@@ -147,12 +191,17 @@ class DQLAgent(_Player):
         dice_roll = throw_dice()
         dice_roll[:2].sort()
         _, next_allowed = self.env.get_possible_actions(*get_moves(dice_roll))
-        next_allowed += (True, )
+        next_allowed += (True,)
         self._memory.next_allowed = next_allowed
         self._memory.next_dice_roll = dice_roll
         self._memory.reward = reward
         self._memory.terminate = terminate
-        DQLAgent.replay_memory.append(self._memory)
+
+        # print("_____")
+        # print(self._memory.state)
+        # print(self._memory.action)
+        # print(self._memory.next_state)
+        self._replay_memory.append(copy.deepcopy(self._memory))
 
     def end_round_callback(self):
         return
@@ -177,3 +226,9 @@ class DQLAgent(_Player):
     @property
     def is_real(self):
         return False
+
+
+if __name__ == "__main__":
+    memory = Memory(np.ones((5, )), 4, np.ones((5, )))
+    memory.terminate = False
+    print(memory)

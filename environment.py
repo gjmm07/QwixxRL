@@ -1,7 +1,7 @@
 import numpy as np
 from operator import itemgetter
 from warnings import warn, showwarning
-from dice_roll import throw_dice
+from dice_roll import throw_dice, get_moves
 from enum import Enum
 from dataclasses import dataclass
 
@@ -136,6 +136,15 @@ def _allowed_combi_actions(pos_white_actions,
     return pos_combi_actions, combi_mask
 
 
+def dists(sel_fields: np.ndarray[np.dtype[bool]]):
+    return (sel_fields.shape[1] - 1 - np.argmax(sel_fields[:, ::-1], axis=1) -
+            (~np.any(sel_fields, axis=1) * sel_fields.shape[1]))
+
+
+def n_slc_row(sel_fields: np.ndarray[np.dtype[bool]]):
+    return np.count_nonzero(sel_fields, axis=1)
+
+
 class Environment:
     MAX_ERRORS: int = 4
     TOTAL_SCORE_LOOKUP: dict[int, int] = {
@@ -180,19 +189,19 @@ class Environment:
                                                                color_dr,
                                                                self._game_env.closed_rows)
 
-        pos_combi_actions, combi_mask = _allowed_combi_actions(pos_white_actions,
-                                                               white_mask,
-                                                               pos_color_actions,
-                                                               color_mask,
-                                                               self.error_count,
-                                                               self.n_slc_row)
+        # pos_combi_actions, combi_mask = _allowed_combi_actions(pos_white_actions,
+        #                                                        white_mask,
+        #                                                        pos_color_actions,
+        #                                                        color_mask,
+        #                                                        self.error_count,
+        #                                                        self.n_slc_row)
         pos_moves = [[x] for x in zip(*pos_white_actions)]
         pos_moves += [[x] for x in zip(*pos_color_actions)]
-        pos_moves += [[tuple(pos_combi_actions[i, 0, :]), tuple(pos_combi_actions[i, 1, :])]
-                      for i in range(pos_combi_actions.shape[0])]
+        # pos_moves += [[tuple(pos_combi_actions[i, 0, :]), tuple(pos_combi_actions[i, 1, :])]
+        #               for i in range(pos_combi_actions.shape[0])]
         mask = list(white_mask)
         mask += list(color_mask)
-        mask += list(combi_mask)
+        # mask += list(combi_mask)
         return pos_moves, mask
 
     def get_possible_white_actions(self, white_dr: int) -> tuple[list[list[tuple[int, int]]], list[bool]]:
@@ -202,12 +211,11 @@ class Environment:
 
     @property
     def n_slc_row(self):
-        return np.count_nonzero(self.sel_fields, axis=1)
+        return n_slc_row(self.sel_fields)
 
     @property
     def dists(self):
-        return (self.sel_fields.shape[1] - 1 - np.argmax(self.sel_fields[:, ::-1], axis=1) -
-                (~np.any(self.sel_fields, axis=1) * self.sel_fields.shape[1]))
+        return dists(self.sel_fields)
 
     def take_move_idx(self, rows: tuple[int, ...], columns: tuple[int, ...]) -> None:
         # Environment.game_env.__CLOSED_ROWS += [row for row, col in zip(rows, columns) if col == BOARD.shape[1] - 1]
@@ -238,4 +246,8 @@ class Environment:
 
 
 if __name__ == "__main__":
-    pass
+    env = Environment()
+    env.take_move_idx((0, ), (0, ))
+    env.take_move_idx((0,), (1,))
+    env.take_move_idx((0,), (9,))
+    print(env.get_possible_actions(*get_moves(throw_dice())))

@@ -5,16 +5,22 @@ from collections import deque
 from stats_palyer import Agent
 from RealPlayer import RealPlayer
 from MC_RL_agent import RLAgent
-from DQL_agent import DQLAgent, Networks
+from DQL_agent import DQLAgent, Networks, Memory, MemorySmallState
 from typing import Generator
 from dice_roll import throw_dice
 from matplotlib import pyplot as plt
 import numpy as np
+from scipy.ndimage import uniform_filter1d
+
+
+# nets = Networks((15, ), 13, (64, 16, 8, 64))
+nets = Networks((51, ), 13, (128, 64, 16, 64, 128))
+replay_memory: deque[Memory] = deque([], maxlen=1000)
 
 
 class PlayerSetup:
-    PLAYERS: deque[DQLAgent | RealPlayer] = deque([DQLAgent("Finn"),
-                                                   DQLAgent("Luisa")])
+    PLAYERS: deque[DQLAgent | RealPlayer] = deque([DQLAgent("Finn", replay_memory),
+                                                   DQLAgent("Luisa", replay_memory)])
 
     def next_gen(self) -> Generator[tuple[bool, DQLAgent | RealPlayer], None, None]:
         """
@@ -38,20 +44,19 @@ class PlayerSetup:
 
     @staticmethod
     def end_round():
-        for p in pg.PLAYERS:
+        for p in PlayerSetup.PLAYERS:
             p.end_round_callback()
 
     @staticmethod
     def start_round():
-        for p in pg.PLAYERS:
+        for p in PlayerSetup.PLAYERS:
             p.start_round_callback()
 
 
 pg = PlayerSetup()
-nets = Networks((51, ), 45, (32, 16, 8, 16, 32))
 
 
-def sim_main(n_games: int = 100_000):
+def sim_main(n_games: int = 500_000):
     epsilon = 1
     avg_scores = []
     for game in range(n_games):
@@ -69,13 +74,13 @@ def sim_main(n_games: int = 100_000):
                 player.downstream_move(dr)
         scores = pg.end_game()
         avg_scores.append(scores)
-        nets.train(DQLAgent.replay_memory)
+        nets.train(replay_memory)
         if not game % 100:
             print(f"{round(epsilon, 2)} \t {avg_scores[-1]}")
             nets.copy_weights()
         epsilon -= 1 / n_games
     for l in zip(*avg_scores):
-        plt.plot(l, linewidth=.5)
+        plt.plot(uniform_filter1d(l, 50), linewidth=.5)
     plt.show()
 
 
