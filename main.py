@@ -5,23 +5,27 @@ from collections import deque
 from stats_palyer import Agent
 from RealPlayer import RealPlayer
 from MC_RL_agent import RLAgent
-from DQL_agent import DQLAgent, Networks, Memory, MemorySmallState, CNNMemory, CNNNetworks
+from DQL_agent import DQLAgent, Networks, Memory, CNNNetworks
 from typing import Generator
 from dice_roll import throw_dice
 from matplotlib import pyplot as plt
 import numpy as np
 from scipy.ndimage import uniform_filter1d
 
+##########################
+####### PARAMETERS #######
+##########################
+
+replay_memory: deque[Memory] = deque([], maxlen=1000)
 
 # nets = Networks((15, ), 13, (64, 16, 8, 64))
-# nets = Networks((51, ), 13, (128, 64, 16, 64, 128))
-nets = CNNNetworks()
-replay_memory: deque[Memory] = deque([], maxlen=1000)
+nets = Networks((51, ), 13, (128, 64, 16, 64, 128))
+# nets: CNNNetworks | Networks = CNNNetworks()
 
 
 class PlayerSetup:
-    PLAYERS: deque[DQLAgent | RealPlayer] = deque([DQLAgent("Finn", replay_memory),
-                                                   DQLAgent("Luisa", replay_memory)])
+    PLAYERS: deque[DQLAgent | RealPlayer] = deque([DQLAgent("Finn", replay_memory, model=nets),
+                                                   DQLAgent("Luisa", replay_memory, model=nets)])
 
     def next_gen(self) -> Generator[tuple[bool, DQLAgent | RealPlayer], None, None]:
         """
@@ -57,7 +61,7 @@ class PlayerSetup:
 pg = PlayerSetup()
 
 
-def sim_main(n_games: int = 1000):
+def sim_main(n_games: int = 10_000):
     epsilon = 1
     avg_scores = []
     for game in range(n_games):
@@ -70,15 +74,15 @@ def sim_main(n_games: int = 1000):
             if first:
                 pg.start_round()
                 dr = throw_dice()
-                player.do_main_move(dice_roll=dr, net=nets, epsilon=epsilon)
+                player.do_main_move(dice_roll=dr, epsilon=epsilon)
             else:
                 player.downstream_move(dr)
         scores = pg.end_game()
         avg_scores.append(scores)
-        nets.train(replay_memory)
+        nets.train(replay_memory)  # todo: currently this supports only both players with the same net
         if not game % 100:
             print(f"{round(epsilon, 2)} \t {avg_scores[-1]}")
-            nets.copy_weights()
+            nets.copy_weights()  # same as above
         epsilon -= 1 / n_games
     for l in zip(*avg_scores):
         plt.plot(uniform_filter1d(l, 50), linewidth=.5)

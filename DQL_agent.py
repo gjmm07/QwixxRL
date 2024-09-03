@@ -1,5 +1,5 @@
+from __future__ import annotations
 import keras.optimizers
-from keras.src.layers import Conv2D, MaxPooling2D, Flatten, Concatenate, Conv1D, MaxPooling1D
 from _Player import _Player
 import numpy as np
 from environment import ExtraType, dists, n_slc_row
@@ -9,85 +9,30 @@ from dataclasses import dataclass
 import typing
 import random
 from keras import Sequential, Model
-from keras.layers import Dense, Input
+from keras.layers import Dense, Input, Conv2D, MaxPooling2D, Flatten, Concatenate
+# from keras.src.layers import Conv2D, MaxPooling2D, Flatten, Concatenate
 import tensorflow as tf
 import copy
 
 
-@dataclass
-class Memory:
-    map: np.ndarray
-    error_count: int
-    dice_roll: np.ndarray
-
-    next_map: np.ndarray = None
-    next_allowed: list[bool] = None
-    next_error_count: int = None
-    next_dice_roll: np.ndarray = None
-
-    action: int = None
-    reward: int = None
-    terminate: bool = None
-
-    @property
-    def state(self):
-        """
-        state: 44 bool for each field + error count + 6 dices (2 white (sorted) 4 color) = 51
-        :return:
-        """
-        return np.hstack((self.map.ravel(), np.atleast_1d(self.error_count), self.dice_roll))
-
-    @property
-    def next_state(self):
-        return np.hstack((self.next_map.ravel(), np.atleast_1d(self.next_error_count), self.next_dice_roll / 6))
-
-
-@dataclass
-class MemorySmallState(Memory):
-
-    @property
-    def state(self):
-        """
-        The state space is significantly smaller because instead of passing the whole map the distances to
-        the furthest right cross and the amount of crosses per row is returned
-        --> 4 distances, 4 crosses per row, error count, dice roll (6) = 15
-        :return:
-        """
-        return np.hstack(
-            ((dists(self.map) + 1) / 12, n_slc_row(self.map) / 11, np.atleast_1d(self.error_count), self.dice_roll))
-
-    @property
-    def next_state(self):
-        return np.hstack(
-            ((dists(self.next_map) + 1) / 12, n_slc_row(self.next_map) / 11,
-             np.atleast_1d(self.next_error_count),
-             self.next_dice_roll / 6))
-
-
-@dataclass
-class CNNMemory(Memory):
-
-    @property
-    def state(self):
-        return self.map, np.hstack((np.atleast_1d(self.error_count), self.dice_roll))
-
-    @property
-    def next_state(self):
-        return self.next_map, np.hstack((np.atleast_1d(self.next_error_count), self.next_dice_roll / 6))
-
-
-def sample_replay_memory(replay_memory: typing.Sequence[Memory]):
+def sample_replay_memory(replay_memory: typing.Sequence[Memory], model_type: Networks | CNNNetworks):
     batch_size = 150
     if len(replay_memory) < batch_size:
         batch_size = len(replay_memory)
     batch = random.sample(replay_memory, batch_size)
-    return zip(*((r.state, r.next_state, r.next_allowed, r.action, r.reward, r.terminate) for r in batch))
+    return zip(
+        *((r.get_state(model_type), r.get_next_state(model_type), r.next_allowed, r.action, r.reward, r.terminate)
+          for r in batch))
 
 
 class Networks:
     loss_fn = tf.keras.losses.MeanSquaredError()
 
-    def __init__(self, input_shape: tuple[int], output: int, hidden_layer_neurons: tuple[int, ...]):
+    def __init__(self,
+                 input_shape: tuple[int],
+                 output: int,
+                 hidden_layer_neurons: tuple[int, ...]):
+
         self._target_net: Sequential = Sequential()
         self._target_net.add(Input(shape=input_shape))
         for hl in hidden_layer_neurons:
@@ -121,7 +66,7 @@ class Networks:
     #     self.optimizer.apply_gradients(zip(grads, self._policy_net.trainable_weights))
 
     def train(self, replay_memory: typing.Sequence[Memory]):
-        states, next_states, next_allowed, actions, rewards, term = sample_replay_memory(replay_memory)
+        states, next_states, next_allowed, actions, rewards, term = sample_replay_memory(replay_memory, model_type=self)
         states = np.array(states)
         qsa_prime = np.max(
             self._target_net.predict(np.array(next_states), verbose=0), axis=1, where=next_allowed, initial=-1)
@@ -134,12 +79,16 @@ class Networks:
     def copy_weights(self):
         self._target_net.set_weights(self._policy_net.get_weights())
 
-    def get_best_action(self, state: Memory.state, allowed: tuple[bool]):
+    def get_best_action(self, state: np.ndarray, allowed: tuple[bool]):
         state = np.atleast_2d(state)
         pred = self._policy_net.predict(state, verbose=False)
         pred = pred[0]
         valid_idx = np.where(allowed)[0]
         return valid_idx[np.argmax(pred[valid_idx])]
+
+    @property
+    def input_shape(self):
+        return self._target_net.input_shape
 
 
 class CNNNetworks:
@@ -167,7 +116,7 @@ class CNNNetworks:
         self._target_net.set_weights(self._policy_net.get_weights())
 
     def train(self, replay_memory: typing.Sequence[Memory]):
-        states, next_states, next_allowed, actions, rewards, term = sample_replay_memory(replay_memory)
+        states, next_states, next_allowed, actions, rewards, term = sample_replay_memory(replay_memory, model_type=self)
         map_, state = (np.array(x) for x in zip(*states))
         next_map, next_state = (np.array(x) for x in zip(*next_states))
 
@@ -179,7 +128,7 @@ class CNNNetworks:
         x = self._policy_net.train_on_batch([map_, state], qsa)
         print(x)
 
-    def get_best_action(self, state: Memory.state, allowed: tuple[bool]):
+    def get_best_action(self, state: tuple[np.ndarray, np.ndarray], allowed: tuple[bool]):
         map_, state = (np.array(x)[np.newaxis, ...] for x in state)
         pred = self._policy_net.predict([map_, state], verbose=False)
         pred = pred[0]
@@ -187,18 +136,64 @@ class CNNNetworks:
         return valid_idx[np.argmax(pred[valid_idx])]
 
 
+@dataclass
+class Memory:
+    map: np.ndarray
+    error_count: int
+    dice_roll: np.ndarray
+
+    next_map: np.ndarray = None
+    next_allowed: list[bool] = None
+    next_error_count: int = None
+    next_dice_roll: np.ndarray = None
+
+    action: int = None
+    reward: float = None
+    terminate: bool = None
+
+    def get_state(self, model: CNNNetworks | Networks):
+        """
+        big state: 44 bool for each field + error count + 6 dices (2 white (sorted) 4 color) = 51
+        small state: 4 distances, 4 crosses per row, error count, dice roll (6) = 15
+        cnn state: <<tuple>> 4 x 11 map, error count + 6 dices
+        :return:
+        """
+        if isinstance(model, CNNNetworks):
+            return self.map, np.hstack((np.atleast_1d(self.error_count), self.dice_roll))
+        if model.input_shape == (None, 15):
+            return np.hstack(
+                ((dists(self.map) + 1) / 12, n_slc_row(self.map) / 11, np.atleast_1d(self.error_count), self.dice_roll))
+        else:
+            return np.hstack((self.map.ravel(), np.atleast_1d(self.error_count), self.dice_roll))
+
+    def get_next_state(self, model: CNNNetworks | Networks):
+        if isinstance(model, CNNNetworks):
+            return self.next_map, np.hstack((np.atleast_1d(self.next_error_count), self.next_dice_roll / 6))
+        if model.input_shape == (None, 15):
+            return np.hstack(
+                ((dists(self.next_map) + 1) / 12, n_slc_row(self.next_map) / 11,
+                 np.atleast_1d(self.next_error_count),
+                 self.next_dice_roll / 6))
+        else:
+            return np.hstack((self.next_map.ravel(), np.atleast_1d(self.next_error_count), self.next_dice_roll / 6))
+
+
 class DQLAgent(_Player):
     games: int = 0
 
-    def __init__(self, name: str, replay_memory: deque[Memory]):
+    def __init__(self,
+                 name: str,
+                 replay_memory: deque[Memory],
+                 model: CNNNetworks | Networks):
         super().__init__(name)
         self._score: int = 0
         self._type: typing.Literal["main", "downstream"] = "main"
         self._first_round = True
         self._replay_memory = replay_memory
-        self._memory: Memory = CNNMemory(np.empty((1, )), -100, np.empty((1, )))
+        self._memory: Memory = Memory(np.empty((1, )), -100, np.empty((1, )))
+        self._model: CNNNetworks | Networks = model
 
-    def do_main_move(self, dice_roll: np.ndarray, net: Networks, epsilon: float):
+    def do_main_move(self, dice_roll: np.ndarray, epsilon: float):
         """
         (4, 2) single color actions, 4 white actions, combo moves and error = 45 possible moves
         in combination with 2⁴⁴ possible states this is impossible to model in a q-table
@@ -215,7 +210,7 @@ class DQLAgent(_Player):
         if random.random() < epsilon:
             action_idx = self._select_random_action(allowed)
         else:
-            action_idx = net.get_best_action(self._memory.state, allowed)
+            action_idx = self._model.get_best_action(self._memory.get_state(self._model), allowed)
         self._memory.action = action_idx
         action = moves[action_idx]
         super().take_action(action)
@@ -241,6 +236,9 @@ class DQLAgent(_Player):
         # action = moves[action_idx]
         # super().take_action(action)
         # return action
+
+    def train_model(self):
+        self._model.train(self._replay_memory)
 
     def _select_random_action(self, allowed):
         return np.random.choice(np.where(allowed)[0])
