@@ -44,28 +44,23 @@ class Networks:
         self._target_net.compile(keras.optimizers.Adam(learning_rate=1e-4), loss=self.loss_fn)
         self._policy_net.compile(keras.optimizers.Adam(learning_rate=1e-4), loss=self.loss_fn)
         self._n_output = output
-        # self.optimizer = keras.optimizers.Adam(learning_rate=1e-5)
-
-    # def train(self, replay_memory: typing.Sequence[Memory]):
-    #     batch_size = 150
-    #     if len(replay_memory) < batch_size:
-    #         batch_size = len(replay_memory)
-    #     batch = random.sample(replay_memory, batch_size)
-    #     states, next_states, next_allowed, actions, rewards, term = zip(
-    #         *((r.state, r.next_state, r.next_allowed, r.action, r.reward, r.terminate) for r in batch))
-    #     q_s_a_prime = np.max(
-    #         self._target_net(
-    #             np.vstack(next_states), training=True), axis=1, where=next_allowed, initial=-1)
-    #     q_s_a_target = np.where(term, rewards, rewards + 0.9 * q_s_a_prime)
-    #     q_s_a_target = tf.convert_to_tensor(q_s_a_target, dtype="float32")
-    #     with tf.GradientTape() as tape:
-    #         q_s_a = tf.reduce_sum(
-    #             self._policy_net(np.vstack(states)) * tf.one_hot(actions, self._n_output), axis=1)
-    #         loss = Networks.loss_fn(q_s_a_target, q_s_a)
-    #     grads = tape.gradient(loss, self._policy_net.trainable_weights)
-    #     self.optimizer.apply_gradients(zip(grads, self._policy_net.trainable_weights))
+        self.optimizer = keras.optimizers.Adam(learning_rate=1e-5)
 
     def train(self, replay_memory: typing.Sequence[Memory]):
+        states, next_states, next_allowed, actions, rewards, term = sample_replay_memory(replay_memory, model_type=self)
+        q_s_a_prime = np.max(
+            self._target_net(
+                np.vstack(next_states), training=True), axis=1, where=next_allowed, initial=-1)
+        q_s_a_target = np.where(term, rewards, rewards + 0.9 * q_s_a_prime)
+        q_s_a_target = tf.convert_to_tensor(q_s_a_target, dtype="float32")
+        with tf.GradientTape() as tape:
+            q_s_a = tf.reduce_sum(
+                self._policy_net(np.vstack(states)) * tf.one_hot(actions, self._n_output), axis=1)
+            loss = Networks.loss_fn(q_s_a_target, q_s_a)
+        grads = tape.gradient(loss, self._policy_net.trainable_weights)
+        self.optimizer.apply_gradients(zip(grads, self._policy_net.trainable_weights))
+
+    def train2(self, replay_memory: typing.Sequence[Memory]):
         states, next_states, next_allowed, actions, rewards, term = sample_replay_memory(replay_memory, model_type=self)
         states = np.array(states)
         qsa_prime = np.max(

@@ -61,7 +61,7 @@ class PlayerSetup:
 pg = PlayerSetup()
 
 
-def sim_main(n_games: int = 5_000):
+def sim_main(n_games: int = 50_000):
     epsilon = 1
     avg_scores = []
     for game in range(n_games):
