@@ -16,7 +16,7 @@ from scipy.ndimage import uniform_filter1d
 ####### PARAMETERS #######
 ##########################
 
-replay_memory: deque[Memory] = deque([], maxlen=1000)
+replay_memory: deque[Memory] = deque([], maxlen=500)
 
 # nets = Networks((15, ), 13, (64, 16, 8, 64))
 nets = Networks((51, ), 13, (128, 64, 16, 64, 128))
@@ -61,7 +61,7 @@ class PlayerSetup:
 pg = PlayerSetup()
 
 
-def sim_main(n_games: int = 10_000):
+def sim_main(n_games: int = 5_000):
     epsilon = 1
     avg_scores = []
     for game in range(n_games):
