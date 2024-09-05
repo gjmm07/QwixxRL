@@ -136,12 +136,12 @@ def _allowed_combi_actions(pos_white_actions,
     return pos_combi_actions, combi_mask
 
 
-def dists(sel_fields: np.ndarray[np.dtype[bool]]):
+def dists(sel_fields: np.ndarray):
     return (sel_fields.shape[1] - 1 - np.argmax(sel_fields[:, ::-1], axis=1) -
             (~np.any(sel_fields, axis=1) * sel_fields.shape[1]))
 
 
-def n_slc_row(sel_fields: np.ndarray[np.dtype[bool]]):
+def n_slc_row(sel_fields: np.ndarray):
     return np.count_nonzero(sel_fields, axis=1)
 
 

@@ -11,6 +11,7 @@ from dice_roll import throw_dice
 from matplotlib import pyplot as plt
 import numpy as np
 from scipy.ndimage import uniform_filter1d
+import matplotlib.colors as mplc
 
 ##########################
 ####### PARAMETERS #######
@@ -18,14 +19,18 @@ from scipy.ndimage import uniform_filter1d
 
 replay_memory: deque[Memory] = deque([], maxlen=500)
 
-# nets = Networks((15, ), 13, (64, 16, 8, 64))
-nets = Networks((51, ), 13, (128, 64, 16, 64, 128))
+small_nets = Networks((15, ), 13, (64, 16, 8, 64))
+big_nets = Networks((51, ), 13, (128, 64, 16, 64, 128))
 # nets: CNNNetworks | Networks = CNNNetworks()
+
+nets = [small_nets, big_nets]
 
 
 class PlayerSetup:
-    PLAYERS: deque[DQLAgent | RealPlayer] = deque([DQLAgent("Finn", replay_memory, model=nets),
-                                                   DQLAgent("Luisa", replay_memory, model=nets)])
+    PLAYERS: deque[DQLAgent | RealPlayer] = deque([
+        DQLAgent("Finn", replay_memory, model=big_nets),
+        DQLAgent("Luisa", replay_memory, model=small_nets)
+    ])
 
     def next_gen(self) -> Generator[tuple[bool, DQLAgent | RealPlayer], None, None]:
         """
@@ -42,7 +47,7 @@ class PlayerSetup:
     def end_game():
         scores = [p.env.compute_total_score() for p in PlayerSetup.PLAYERS]
         for p, winner in zip(PlayerSetup.PLAYERS, [x == max(scores) for x in scores]):
-            p.end_game_callback(10 if winner else 0)  # reward the winner extra
+            p.end_game_callback(10 if winner else -5)  # reward the winner extra
             # todo: include amount of moves made as reward?
         PlayerSetup.PLAYERS.rotate(-1)
         return scores
@@ -79,14 +84,20 @@ def sim_main(n_games: int = 50_000):
                 player.downstream_move(dr)
         scores = pg.end_game()
         avg_scores.append(scores)
-        nets.train(replay_memory)  # todo: currently this supports only both players with the same net
+        for net in nets:
+            net.train(replay_memory)
         if not game % 100:
             print(f"{round(epsilon, 2)} \t {avg_scores[-1]}")
-            nets.copy_weights()  # same as above
-        epsilon -= 1 / n_games
-    for l in zip(*avg_scores):
-        plt.plot(uniform_filter1d(l, 50), linewidth=.5)
+            for net in nets:
+                net.copy_weights()
+        epsilon -= epsilon * 8e-5
+        epsilon = max((0.01, epsilon))
+    for l, color in zip(zip(*avg_scores), mplc.TABLEAU_COLORS.keys()):
+        plt.plot(l, alpha=0.3, color=color, linewidth=0.1)
+        plt.plot(uniform_filter1d(l, 50), color=color)
     plt.show()
+    for net in nets:
+        net.save()
 
 
 def main():
