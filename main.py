@@ -66,7 +66,7 @@ class PlayerSetup:
 pg = PlayerSetup()
 
 
-def sim_main(n_games: int = 50_000):
+def sim_main(n_games: int = 500_000):
     epsilon = 1
     avg_scores = []
     for game in range(n_games):
@@ -90,7 +90,7 @@ def sim_main(n_games: int = 50_000):
             print(f"{round(epsilon, 2)} \t {avg_scores[-1]}")
             for net in nets:
                 net.copy_weights()
-        epsilon -= epsilon * 8e-5
+        epsilon -= 1 / n_games
         epsilon = max((0.01, epsilon))
     for l, color in zip(zip(*avg_scores), mplc.TABLEAU_COLORS.keys()):
         plt.plot(l, alpha=0.3, color=color, linewidth=0.1)
