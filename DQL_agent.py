@@ -13,11 +13,12 @@ from keras.layers import Dense, Input, Conv2D, MaxPooling2D, Flatten, Concatenat
 # from keras.src.layers import Conv2D, MaxPooling2D, Flatten, Concatenate
 import tensorflow as tf
 import copy
+import os
 
 
 def sample_replay_memory(replay_memory: typing.Sequence[Memory],
                          model_type: Networks | CNNNetworks,
-                         batch_size: int = 150):
+                         batch_size: int = 250):
     if len(replay_memory) < batch_size:
         batch_size = len(replay_memory)
     batch = random.sample(replay_memory, batch_size)
@@ -30,24 +31,41 @@ class Networks:
     loss_fn = tf.keras.losses.MeanSquaredError()
 
     def __init__(self,
-                 input_shape: tuple[int],
-                 output: int,
-                 hidden_layer_neurons: tuple[int, ...]):
+                 policy_net: keras.Sequential,
+                 target_net: keras.Sequential = None,
+                 gamma: float = None):
 
-        self._target_net: Sequential = Sequential()
-        self._target_net.add(Input(shape=input_shape))
-        for hl in hidden_layer_neurons:
-            self._target_net.add(Dense(hl, activation="relu"))
-        self._target_net.add(Dense(output, activation="linear"))
-
-        self._policy_net: Sequential = tf.keras.models.clone_model(self._target_net)
-
-        self._target_net.compile(keras.optimizers.Adam(learning_rate=1e-4), loss=self.loss_fn)
-        self._policy_net.compile(keras.optimizers.Adam(learning_rate=1e-4), loss=self.loss_fn)
-        self._n_output = output
+        self._target_net = target_net
+        self._policy_net = policy_net
+        self._gamma = gamma
         # self.optimizer = keras.optimizers.Adam(learning_rate=1e-5)
 
+    @classmethod
+    def for_gameplay(cls, model_path: os.PathLike | str) -> Networks:
+        return cls(keras.models.load_model(model_path))
+
+    @classmethod
+    def for_training(cls,
+                     input_shape: tuple[int],
+                     output: int,
+                     hidden_layer_neurons: tuple[int, ...],
+                     alpha: float,
+                     gamma: float) -> Networks:
+        target_net: Sequential = Sequential()
+        target_net.add(Input(shape=input_shape))
+        for hl in hidden_layer_neurons:
+            target_net.add(Dense(hl, activation="relu"))
+        target_net.add(Dense(output, activation="linear"))
+
+        policy_net: Sequential = tf.keras.models.clone_model(target_net)
+
+        target_net.compile(keras.optimizers.Adam(learning_rate=alpha), loss=cls.loss_fn)
+        policy_net.compile(keras.optimizers.Adam(learning_rate=alpha), loss=cls.loss_fn)
+        return cls(policy_net, target_net, gamma=gamma)
+
     def train2(self, replay_memory: typing.Sequence[Memory]):
+        if self._target_net is None:
+            raise NotImplementedError("Please implement the target network")
         states, next_states, next_allowed, actions, rewards, term = sample_replay_memory(replay_memory, model_type=self)
         q_s_a_prime = np.max(
             self._target_net(
@@ -62,6 +80,8 @@ class Networks:
         # self.optimizer.apply_gradients(zip(grads, self._policy_net.trainable_weights))
 
     def train(self, replay_memory: typing.Sequence[Memory]):
+        if self._target_net is None:
+            raise NotImplementedError("Please implement the target network")
         batch_size = 150
         states, next_states, next_allowed, actions, rewards, term = sample_replay_memory(
             replay_memory, model_type=self, batch_size=batch_size)
@@ -71,11 +91,14 @@ class Networks:
             self._target_net(next_states).numpy(), axis=1, where=next_allowed, initial=-1)
         qsa = self._policy_net(states).numpy()
         np.put_along_axis(
-            qsa, np.atleast_2d(actions).T, np.atleast_2d(np.where(term, rewards, rewards + 0.5 * qsa_prime)).T, axis=1)
+            qsa, np.atleast_2d(actions).T, np.atleast_2d(
+                np.where(term, rewards, rewards + self._gamma * qsa_prime)).T, axis=1)
         qsa = tf.convert_to_tensor(qsa, dtype="float32")
         self._policy_net.fit(states, qsa, verbose=False, batch_size=batch_size)
 
     def copy_weights(self):
+        if self._target_net is None:
+            raise NotImplementedError("Please implement the target network")
         self._target_net.set_weights(self._policy_net.get_weights())
 
     def get_best_action(self, state: np.ndarray, allowed: tuple[bool]):
@@ -87,7 +110,7 @@ class Networks:
 
     @property
     def input_shape(self):
-        return self._target_net.input_shape
+        return self._policy_net.input_shape
 
     def save(self):
         self._policy_net.save(f"models/{self.input_shape[1]}_model.keras")
@@ -195,6 +218,8 @@ class DQLAgent(_Player):
         self._replay_memory = replay_memory
         self._memory: Memory = Memory(np.empty((1, )), -100, np.empty((1, )))
         self._model: CNNNetworks | Networks = model
+        self._n_moves: int = 0
+        self._n_cls_fields: int = 0
 
     def do_main_move(self, dice_roll: np.ndarray, epsilon: float):
         """
@@ -216,7 +241,9 @@ class DQLAgent(_Player):
             action_idx = self._model.get_best_action(self._memory.get_state(self._model), allowed)
         self._memory.action = action_idx
         action = moves[action_idx]
+        self._n_cls_fields = np.sum(self.env.dists + 1)
         super().take_action(action)
+        self._n_moves += 1
         return action
 
     def downstream_move(self, dice_roll: np.ndarray):
@@ -243,7 +270,8 @@ class DQLAgent(_Player):
     def train_model(self):
         self._model.train(self._replay_memory)
 
-    def _select_random_action(self, allowed):
+    @staticmethod
+    def _select_random_action(allowed):
         return np.random.choice(np.where(allowed)[0])
 
     def _add_to_replay(self, reward: int, terminate: bool = False):
@@ -274,7 +302,9 @@ class DQLAgent(_Player):
             self._first_round = False
             return
         new_score = self.env.compute_total_score()
-        reward = (new_score - self._score)  # + (40 - np.sum(self.env.dists)) / 40  # rewards score + clickable fields
+        round_cls_flds = self._n_cls_fields - np.sum(self.env.dists + 1)
+        round_score = new_score - self._score
+        reward = round_score + round_cls_flds
         # todo: include amount of moves made as reward?
         self._add_to_replay(reward)
         self._score = new_score
@@ -284,6 +314,7 @@ class DQLAgent(_Player):
         self._add_to_replay(reward, True)
         self.env.reset()
         self._first_round = True
+        self._n_moves = 0
         return self.env.compute_total_score()
 
     @property

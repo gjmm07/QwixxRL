@@ -19,17 +19,17 @@ import matplotlib.colors as mplc
 
 replay_memory: deque[Memory] = deque([], maxlen=500)
 
-small_nets = Networks((15, ), 13, (64, 16, 8, 64))
-big_nets = Networks((51, ), 13, (128, 64, 16, 64, 128))
+small_nets = Networks.for_training((15, ), 13, (64, 16, 8, 64), 1e-3, 0.99)
+big_nets = Networks.for_training((51, ), 13, (128, 64, 16, 64, 128), 1e-3, 0.99)
 # nets: CNNNetworks | Networks = CNNNetworks()
-
-nets = [small_nets, big_nets]
+# small_nets = Networks.for_gameplay("models/15_model.keras")
 
 
 class PlayerSetup:
     PLAYERS: deque[DQLAgent | RealPlayer] = deque([
-        DQLAgent("Finn", replay_memory, model=big_nets),
-        DQLAgent("Luisa", replay_memory, model=small_nets)
+        # RealPlayer("Finn"),
+        DQLAgent("Luisa", replay_memory, model=small_nets),
+        DQLAgent("Finn", replay_memory, model=big_nets)
     ])
 
     def next_gen(self) -> Generator[tuple[bool, DQLAgent | RealPlayer], None, None]:
@@ -47,7 +47,7 @@ class PlayerSetup:
     def end_game():
         scores = [p.env.compute_total_score() for p in PlayerSetup.PLAYERS]
         for p, winner in zip(PlayerSetup.PLAYERS, [x == max(scores) for x in scores]):
-            p.end_game_callback(10 if winner else -5)  # reward the winner extra
+            p.end_game_callback(2000 if winner else -2000)  # reward the winner extra
             # todo: include amount of moves made as reward?
         PlayerSetup.PLAYERS.rotate(-1)
         return scores
@@ -66,9 +66,10 @@ class PlayerSetup:
 pg = PlayerSetup()
 
 
-def sim_main(n_games: int = 500_000):
+def sim_main(n_games: int = 1):
     epsilon = 1
     avg_scores = []
+    nets = [small_nets, big_nets]
     for game in range(n_games):
         for first, player in pg.next_gen():
             if player is None:
@@ -86,7 +87,7 @@ def sim_main(n_games: int = 500_000):
         avg_scores.append(scores)
         for net in nets:
             net.train(replay_memory)
-        if not game % 100:
+        if not game % 50:
             print(f"{round(epsilon, 2)} \t {avg_scores[-1]}")
             for net in nets:
                 net.copy_weights()

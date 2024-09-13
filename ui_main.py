@@ -77,7 +77,8 @@ class App(QtWidgets.QMainWindow, gui.Ui_MainWindow):
         self._unreal_player_gen = self.unreal_player_action()
         self.display_dice()
 
-    def blinking_button(self, but, color: Literal["white", "red"]):
+    @staticmethod
+    def blinking_button(but, color: Literal["white", "red"]):
         orig_color = but.palette().color(but.backgroundRole()).name()
         for _ in range(10):
             but.setStyleSheet(f"background-color: {color}")
@@ -86,22 +87,28 @@ class App(QtWidgets.QMainWindow, gui.Ui_MainWindow):
             yield
 
     @staticmethod
-    def _wait(x: int):
+    def _wait(x: int or float):
+        x = int(x)
         for _ in range(x):
             yield
 
-    def unreal_player_action(self):
+    def unreal_player_action(self, pace: float = 0.5):
+        """
+
+        :param pace:
+        :return:
+        """
         while True:
-            yield from self._wait(5)
+            yield from self._wait(5 / pace)
             if self._is_first_player:
                 self.dice_roll = throw_dice()
             self.display_dice()
-            yield from self._wait(15)
+            yield from self._wait(15 / pace)
             if self._is_first_player:
-                actions = self.player.do_main_move(self.dice_roll)
+                actions = self.player.do_main_move(self.dice_roll, epsilon=0)
             else:
                 actions = self.player.downstream_move(self.dice_roll)
-            yield from self._wait(10)
+            yield from self._wait(10 / pace)
             if isinstance(actions, ExtraType):
                 if self._is_first_player:
                     self.error_widgets[self.player.env.error_count - 1].setChecked(True)
@@ -110,7 +117,7 @@ class App(QtWidgets.QMainWindow, gui.Ui_MainWindow):
                 for a in actions:
                     self.grid[a[0]][a[1]].setChecked(True)
                     yield from self.blinking_button(self.grid[a[0]][a[1]], "white")
-            yield from self._wait(20)
+            yield from self._wait(20 / pace)
             self._lock = False
             yield
 
