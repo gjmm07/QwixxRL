@@ -107,7 +107,7 @@ class App(QtWidgets.QMainWindow, gui.Ui_MainWindow):
             if self._is_first_player:
                 actions = self.player.do_main_move(self.dice_roll, epsilon=0)
             else:
-                actions = self.player.downstream_move(self.dice_roll)
+                actions = self.player.downstream_move(self.dice_roll, epsilon=0)
             yield from self._wait(10 / pace)
             if isinstance(actions, ExtraType):
                 if self._is_first_player:
@@ -141,9 +141,9 @@ class App(QtWidgets.QMainWindow, gui.Ui_MainWindow):
         self.setup_player()
         if self.player.env.is_game_over:
             # todo: Properly end game and reset
-            self._player_setup.end_game()
+            self._player_setup.end_game(True)
             self.qTimer.stop()
-            return
+            self.close()
         self._lock = True
 
     def continue_callback(self):

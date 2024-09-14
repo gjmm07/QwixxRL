@@ -21,7 +21,7 @@ class _Player:
     def do_main_move(self, *args, **kwargs):
         raise NotImplementedError
 
-    def downstream_move(self, dice_roll: np.ndarray):
+    def downstream_move(self, *args, **kwargs):
         raise NotImplementedError
 
     def end_game_callback(self, *args, **kwargs) -> int:

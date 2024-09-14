@@ -167,6 +167,7 @@ class Memory:
     map: np.ndarray
     error_count: int
     dice_roll: np.ndarray
+    is_main: bool
 
     next_map: np.ndarray = None
     next_allowed: list[bool] = None
@@ -186,22 +187,32 @@ class Memory:
         """
         if isinstance(model, CNNNetworks):
             return self.map, np.hstack((np.atleast_1d(self.error_count), self.dice_roll))
-        if model.input_shape == (None, 15):
-            return np.hstack(
-                ((dists(self.map) + 1) / 12, n_slc_row(self.map) / 11, np.atleast_1d(self.error_count), self.dice_roll))
+        if model.input_shape == (None, 16):
+            return np.hstack((np.atleast_1d(self.is_main),
+                              (dists(self.map) + 1) / 12,
+                              n_slc_row(self.map) / 11,
+                              np.atleast_1d(self.error_count),
+                              self.dice_roll))
         else:
-            return np.hstack((self.map.ravel(), np.atleast_1d(self.error_count), self.dice_roll))
+            return np.hstack(
+                (np.atleast_1d(self.is_main), self.map.ravel(), np.atleast_1d(self.error_count), self.dice_roll))
 
     def get_next_state(self, model: CNNNetworks | Networks):
         if isinstance(model, CNNNetworks):
             return self.next_map, np.hstack((np.atleast_1d(self.next_error_count), self.next_dice_roll / 6))
-        if model.input_shape == (None, 15):
+        if model.input_shape == (None, 16):
             return np.hstack(
-                ((dists(self.next_map) + 1) / 12, n_slc_row(self.next_map) / 11,
+                (np.atleast_1d(not self.is_main),
+                 (dists(self.next_map) + 1) / 12,
+                 n_slc_row(self.next_map) / 11,
                  np.atleast_1d(self.next_error_count),
                  self.next_dice_roll / 6))
         else:
-            return np.hstack((self.next_map.ravel(), np.atleast_1d(self.next_error_count), self.next_dice_roll / 6))
+            return np.hstack(
+                (np.atleast_1d(not self.is_main),
+                 self.next_map.ravel(),
+                 np.atleast_1d(self.next_error_count),
+                 self.next_dice_roll / 6))
 
 
 class DQLAgent(_Player):
@@ -216,25 +227,27 @@ class DQLAgent(_Player):
         self._type: typing.Literal["main", "downstream"] = "main"
         self._first_round = True
         self._replay_memory = replay_memory
-        self._memory: Memory = Memory(np.empty((1, )), -100, np.empty((1, )))
+        self._memory: Memory = Memory(np.empty((1, )), -100, np.empty((1, )), False)
         self._model: CNNNetworks | Networks = model
         self._n_moves: int = 0
         self._n_cls_fields: int = 0
 
-    def do_main_move(self, dice_roll: np.ndarray, epsilon: float):
-        """
-        (4, 2) single color actions, 4 white actions, combo moves and error = 45 possible moves
-        in combination with 2⁴⁴ possible states this is impossible to model in a q-table
-        """
-        self._type = "main"
+    def _do_move(self, dice_roll: np.ndarray, epsilon: float, is_main: bool):
         dice_roll[0:2].sort()
         self._memory.map = self.env.sel_fields.astype(int)
         self._memory.error_count = self.env.error_count / 4
         self._memory.dice_roll = dice_roll / 6
         white_dr, color_dr = get_moves(dice_roll)
-        moves, allowed = self.env.get_possible_actions(white_dr, color_dr)
-        allowed += [True]
-        moves += [ExtraType.error]
+        self._memory.is_main = is_main
+        if is_main:
+            moves, allowed = self.env.get_possible_actions(white_dr, color_dr)
+            allowed += [False, True]
+        else:
+            moves, allowed = self.env.get_possible_white_actions(white_dr)
+            moves += [None] * 8
+            allowed += [False] * 8
+            allowed += [True, False]
+        moves += [ExtraType.blank, ExtraType.error]
         if random.random() < epsilon:
             action_idx = self._select_random_action(allowed)
         else:
@@ -246,26 +259,15 @@ class DQLAgent(_Player):
         self._n_moves += 1
         return action
 
-    def downstream_move(self, dice_roll: np.ndarray):
-        """
-        state: 44 bool for each field + white dice sum = 45 states
-        actions: 4 white actions and blank moves = 5 possible actions
-        """
+    def do_main_move(self, dice_roll: np.ndarray, epsilon: float):
+        self._type = "main"
+        action = self._do_move(dice_roll, epsilon, True)
+        return action
+
+    def downstream_move(self, dice_roll: np.ndarray, epsilon: float):
         self._type = "downstream"
-        return ExtraType.blank
-        # white_dr = np.sum(dice_roll[:2])
-        # self._state = np.append(self.env.sel_fields.ravel(), white_dr / 12)
-        # moves, allowed = self.env.get_possible_white_actions(white_dr)
-        # allowed += [True]
-        # moves += [ExtraType.blank]
-        # if random.random() < self._epsilon:
-        #     action_idx = self._select_random_action(allowed)
-        # else:
-        #     action_idx = downstream_net.get_best_action(np.atleast_2d(self._state), allowed)
-        # self._action = action_idx
-        # action = moves[action_idx]
-        # super().take_action(action)
-        # return action
+        action = self._do_move(dice_roll, epsilon, False)
+        return action
 
     def train_model(self):
         self._model.train(self._replay_memory)
@@ -275,23 +277,26 @@ class DQLAgent(_Player):
         return np.random.choice(np.where(allowed)[0])
 
     def _add_to_replay(self, reward: int, terminate: bool = False):
-        if self._type == "downstream":
-            return
         self._memory.next_map = self.env.sel_fields.astype(int)
         self._memory.next_error_count = self.env.error_count / 4
         dice_roll = throw_dice()
         dice_roll[:2].sort()
-        _, next_allowed = self.env.get_possible_actions(*get_moves(dice_roll))
-        next_allowed += (True,)
+        if self._type == "downstream":
+            _, next_allowed = self.env.get_possible_white_actions(get_moves(dice_roll)[0])
+            next_allowed += [False] * 8
+            next_allowed += [True, False]
+        else:
+            _, next_allowed = self.env.get_possible_actions(*get_moves(dice_roll))
+            next_allowed += (False, True)
         self._memory.next_allowed = next_allowed
         self._memory.next_dice_roll = dice_roll
         self._memory.reward = reward
         self._memory.terminate = terminate
 
         # print("_____")
-        # print(self._memory.state)
+        # print(self._memory.get_state(self._model))
         # print(self._memory.action)
-        # print(self._memory.next_state)
+        # print(self._memory.get_next_state(self._model))
         self._replay_memory.append(copy.deepcopy(self._memory))
 
     def end_round_callback(self):
