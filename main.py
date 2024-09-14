@@ -66,7 +66,7 @@ class PlayerSetup:
 pg = PlayerSetup()
 
 
-def sim_main(n_games: int = 1):
+def sim_main(n_games: int = 250_000):
     epsilon = 1
     avg_scores = []
     nets = [small_nets, big_nets]
