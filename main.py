@@ -2,35 +2,35 @@ from ui_main import App
 from PyQt5.QtWidgets import QApplication
 import sys
 from collections import deque
-from stats_palyer import Agent
 from RealPlayer import RealPlayer
-from MC_RL_agent import RLAgent
 from DQL_agent import DQLAgent, Networks, Memory, CNNNetworks
 from typing import Generator
 from dice_roll import throw_dice
 from matplotlib import pyplot as plt
-import numpy as np
 from scipy.ndimage import uniform_filter1d
 import matplotlib.colors as mplc
+import argparse
+from itertools import zip_longest
 
 ##########################
 ####### PARAMETERS #######
 ##########################
 
-replay_memory: deque[Memory] = deque([], maxlen=500)
+REPLAY_MEMORY: deque[Memory] = deque([], maxlen=500)
 
 # small_nets = Networks.for_training((16, ), 14, (64, 16, 8, 64), 1e-3, 0.99)
 # big_nets = Networks.for_training((52, ), 14, (128, 64, 16, 64, 128), 1e-3, 0.99)
 # nets: CNNNetworks | Networks = CNNNetworks()
-small_nets = Networks.for_gameplay("models/16_model.keras")
+# small_nets = Networks.for_gameplay("models/16_model.keras")
+NETS = {"small": Networks.for_training((16,), 14, (64, 16, 8, 64), 1e-3, 0.99),
+         "big": Networks.for_training((52, ), 14, (128, 64, 16, 64, 128), 1e-3, 0.99)}
 
 
 class PlayerSetup:
-    PLAYERS: deque[DQLAgent | RealPlayer] = deque([
-        RealPlayer("Finn"),
-        DQLAgent("Luisa", replay_memory, model=small_nets),
-        # DQLAgent("Finn", replay_memory, model=big_nets)
-    ])
+    # PLAYERS: deque[DQLAgent | RealPlayer] = deque()
+
+    def __init__(self, player: deque[DQLAgent | RealPlayer]):
+        self.PLAYERS = player
 
     def next_gen(self) -> Generator[tuple[bool, DQLAgent | RealPlayer], None, None]:
         """
@@ -43,10 +43,10 @@ class PlayerSetup:
             yield None, None  # End of round
             players.rotate(-1)
 
-    @staticmethod
-    def end_game(print_score: bool = False):
-        scores = [p.env.compute_total_score() for p in PlayerSetup.PLAYERS]
-        for p, score in zip(PlayerSetup.PLAYERS, scores):
+    # @staticmethod
+    def end_game(self, print_score: bool = False):
+        scores = [p.env.compute_total_score() for p in self.PLAYERS]
+        for p, score in zip(self.PLAYERS, scores):
             is_winner = score == max(scores)
             p.end_game_callback(2000 if is_winner else -2000)  # reward the winner extra
             # todo: include amount of moves made as reward?
@@ -54,27 +54,24 @@ class PlayerSetup:
                 print("{name} {win_lose} with {points}".format(name=p.name,
                                                                win_lose="wins" if is_winner else "looses",
                                                                points=score))
-        PlayerSetup.PLAYERS.rotate(-1)
+        self.PLAYERS.rotate(-1)
         return scores
 
-    @staticmethod
-    def end_round():
-        for p in PlayerSetup.PLAYERS:
+    # @staticmethod
+    def end_round(self):
+        for p in self.PLAYERS:
             p.end_round_callback()
 
-    @staticmethod
-    def start_round():
-        for p in PlayerSetup.PLAYERS:
+    # @staticmethod
+    def start_round(self):
+        for p in self.PLAYERS:
             p.start_round_callback()
 
 
-pg = PlayerSetup()
-
-
-def sim_main(n_games: int = 10_000):
+def train(n_games: int, nets: set):
     epsilon = 1
     avg_scores = []
-    nets = [small_nets, big_nets]
+    # nets = [small_nets, big_nets]
     for game in range(n_games):
         for first, player in pg.next_gen():
             if player is None:
@@ -91,7 +88,7 @@ def sim_main(n_games: int = 10_000):
         scores = pg.end_game()
         avg_scores.append(scores)
         for net in nets:
-            net.train(replay_memory)
+            net.train(REPLAY_MEMORY)
         if not game % 50:
             print(f"{round(epsilon, 2)} \t {avg_scores[-1]}")
             for net in nets:
@@ -106,15 +103,29 @@ def sim_main(n_games: int = 10_000):
         net.save()
 
 
-def main():
-    if any(type(p) is RealPlayer for p in pg.PLAYERS):
-        app = QApplication(sys.argv)
-        form = App(player_setup=pg)
-        form.show()
-        app.exec_()
-    else:
-        sim_main()
+def play():
+    app = QApplication(sys.argv)
+    form = App(player_setup=pg)
+    form.show()
+    app.exec_()
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("type", choices=["train", "play"])
+    parser.add_argument("-s", "--simp", action="append")
+    parser.add_argument("-n", "--net", action="append")
+    parser.add_argument("-r", "--realp", action="append")
+    parser.add_argument("-e", "--epochs", type=int)
+    # todo: There is still quite a bit to do here,
+    #  e.g. keep order real player sim player,
+    #  in play mode let simp have a model,
+    #  do checks: enough nets for simp,  epochs define for training
+    args = parser.parse_args()
+    player_nets = [NETS[x] for x in args.net]
+    pg = PlayerSetup(deque([RealPlayer(name) for name in args.realp] +
+                           [DQLAgent(name, REPLAY_MEMORY, net) for name, net in zip_longest(args.simp, player_nets)]))
+    if args.type == "train":
+        train(args.epochs, set(player_nets))
+    elif args.type == "play":
+        play()
