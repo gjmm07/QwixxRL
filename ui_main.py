@@ -2,10 +2,8 @@ from __future__ import annotations
 from PyQt5 import QtCore, QtGui, QtWidgets, QtTest
 import gui
 import numpy as np
-from RealPlayer import RealPlayer
+from _Player import _Player
 from collections import deque
-from MC_RL_agent import RLAgent
-from typing import Generator
 from dice_roll import throw_dice
 from functools import partial
 from environment import BOARD, ExtraType
@@ -59,7 +57,7 @@ class App(QtWidgets.QMainWindow, gui.Ui_MainWindow):
                                                     self.Yellow_dice, self.Green_dice, self.Blue_dice]
         self.player_gen = player_setup.next_gen()
         self._player_setup = player_setup
-        self.player: RLAgent | RealPlayer | None = None
+        self.player: _Player | None = None
 
         self.dice_roll: tuple[np.ndarray] = -np.ones((6, )).astype(int)
         self.history: deque[np.ndarray] = deque(maxlen=3)
